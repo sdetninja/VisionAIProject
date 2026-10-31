@@ -1,0 +1,85 @@
+# PPE model dataset recipe.
+# 1) Download each source (see MILESTONE0_PLAYBOOK.md) into data/raw/<name>/
+# 2) VERIFY each source's class names against its own data.yaml, then edit the `map` below.
+#    Source class names are matched case-insensitively. Unmapped classes are dropped.
+
+output_dir: data/processed/ppe
+seed: 42
+val_fraction: 0.15
+test_fraction: 0.10
+keep_background_images: true      # images that end up with zero labels (useful negatives)
+max_background_fraction: 0.05     # cap on unlabeled images so they do not dominate
+
+classes:                          # target taxonomy, index = position
+  - person
+  - helmet
+  - no_helmet
+  - vest
+  - no_vest
+  - gloves
+  - no_gloves
+  - goggles
+  - mask
+  - forklift
+  - truck
+
+sources:
+  # split: auto       -> randomly distributed over train/val/test
+  # split: train_only -> never used for val/test (e.g. synthetic data)
+  # split: test_heavy -> 50% test, 50% val (use for own-camera data so metrics reflect your domain)
+  - name: sh17
+    path: data/raw/sh17
+    split: auto
+    map:                          # SH17 names (verify!): Person, Helmet, Safety-vest, Gloves, Glasses, Face-mask-medical ...
+      person: person
+      helmet: helmet
+      safety-vest: vest
+      gloves: gloves
+      glasses: goggles
+      face-mask-medical: mask
+
+  - name: construction_ppe
+    path: data/raw/construction_ppe
+    split: auto
+    map:                          # verify against the downloaded data.yaml
+      person: person
+      helmet: helmet
+      no_helmet: no_helmet
+      vest: vest
+      gloves: gloves
+      no_gloves: no_gloves
+      goggles: goggles
+      no_goggle: goggles          # NOTE: "no goggles" mapped away intentionally; remove if you add a no_goggles class
+
+  - name: roboflow_ppe_1
+    path: data/raw/roboflow_ppe_1
+    split: auto
+    map:
+      person: person
+      hardhat: helmet
+      no-hardhat: no_helmet
+      safety vest: vest
+      no-safety vest: no_vest
+      mask: mask
+
+  - name: own_camera
+    path: data/raw/own_camera     # your labeled frames (export from CVAT as "YOLO 1.1")
+    split: test_heavy
+    map:
+      person: person
+      helmet: helmet
+      no_helmet: no_helmet
+      vest: vest
+      no_vest: no_vest
+      gloves: gloves
+      no_gloves: no_gloves
+      goggles: goggles
+      mask: mask
+      forklift: forklift
+      truck: truck
+
+  - name: synthetic_copy_paste
+    path: data/synthetic/ppe
+    split: train_only
+    map: {person: person, helmet: helmet, no_helmet: no_helmet, vest: vest, no_vest: no_vest,
+          gloves: gloves, no_gloves: no_gloves, goggles: goggles, mask: mask}

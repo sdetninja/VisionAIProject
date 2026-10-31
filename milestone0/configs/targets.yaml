@@ -1,0 +1,21 @@
+# Go / no-go targets, evaluated on the frozen TEST split (own-camera data heavy).
+# Adjust after the first baseline; record any change in the playbook with a reason.
+ppe:
+  person:     {recall: 0.92, map50: 0.90}
+  helmet:     {recall: 0.90, map50: 0.85}
+  no_helmet:  {recall: 0.80, map50: 0.70}
+  vest:       {recall: 0.88, map50: 0.82}
+  no_vest:    {recall: 0.75, map50: 0.65}
+  gloves:     {recall: 0.70, map50: 0.55}   # small object: decide early if realistic
+  no_gloves:  {recall: 0.65, map50: 0.50}
+  goggles:    {recall: 0.65, map50: 0.50}
+  mask:       {recall: 0.70, map50: 0.55}
+  forklift:   {recall: 0.85, map50: 0.80}
+  truck:      {recall: 0.85, map50: 0.80}
+hazard:
+  fire:  {recall: 0.85, map50: 0.75}
+  smoke: {recall: 0.80, map50: 0.65}
+
+# A class that misses target is not necessarily a failure: it is DEFERRED
+# (rule engine disabled for that class) or sent back for more data.
+min_test_instances_per_class: 30   # below this, metrics are not trustworthy

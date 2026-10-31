@@ -1,0 +1,22 @@
+# Separate fire/smoke model (different data, thresholds and failure costs than PPE).
+output_dir: data/processed/hazard
+seed: 42
+val_fraction: 0.15
+test_fraction: 0.10
+keep_background_images: true
+max_background_fraction: 0.15     # hazard models need MORE negatives (steam, lights, sun glare, welding arcs)
+
+classes:
+  - fire
+  - smoke
+
+sources:
+  - name: d_fire
+    path: data/raw/d_fire         # github.com/gaiasd/DFireDataset (classes: smoke, fire - verify order in its labels)
+    split: auto
+    map: {fire: fire, smoke: smoke}
+
+  - name: own_hazard_negatives
+    path: data/raw/own_hazard_negatives   # frames of factory scenes WITHOUT fire (welding arcs, steam, orange vests)
+    split: test_heavy
+    map: {fire: fire, smoke: smoke}
