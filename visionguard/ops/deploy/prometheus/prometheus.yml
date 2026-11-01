@@ -1,0 +1,16 @@
+global: {scrape_interval: 15s, evaluation_interval: 15s}
+rule_files: [/etc/prometheus/alerts.yml]
+scrape_configs:
+  # Each worker/API exposes /metrics. If VG_METRICS_TOKEN is set (recommended), supply it here.
+  - job_name: visionguard
+    authorization: {type: Bearer, credentials: change-me-too}      # must equal VG_METRICS_TOKEN; use credentials_file in production
+    static_configs:
+      - {targets: ["rule-engine:9100"],         labels: {service: rule_engine}}
+      - {targets: ["incident-worker:9100"],     labels: {service: incident_worker}}
+      - {targets: ["agent-worker:9100"],        labels: {service: agent_worker}}
+      - {targets: ["notification-worker:9100"], labels: {service: notification_worker}}
+      - {targets: ["incident-api:8003"],        labels: {service: incident_api}}
+      - {targets: ["gateway:8000"],             labels: {service: gateway}}
+  # M1 uses prometheus_client at /metrics (add its target when the vision pipeline runs; it needs a GPU/camera, so it is not in compose).
+  # - job_name: vision
+  #   static_configs: [{targets: ["host.docker.internal:8001"]}]

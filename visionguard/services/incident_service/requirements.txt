@@ -1,0 +1,11 @@
+pyyaml
+numpy
+opencv-python          # opencv-python-headless in Docker
+fastapi>=0.110         # HTTP API (optional for library/CLI use)
+uvicorn[standard]
+# --- optional production backends (imported lazily) ---
+# minio                # MinIO / S3 evidence store
+# confluent-kafka      # Kafka event bus
+# psycopg[binary]      # PostgreSQL (planned repository)
+pytest
+httpx

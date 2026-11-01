@@ -1,0 +1,43 @@
+# Safety rules. Edit, then restart (or PUT /rules for hot reload). Every change should go through code review / the audit log.
+version: 1
+track_expiry_s: 15
+
+defaults:                      # applied to every rule unless overridden
+  confirm: {n: 8, m: 10}       # violation needs 8 of the last 10 *usable* observations
+  cooldown_s: 60               # no repeat event for the same spot/rule within 60 s
+  clear_frames: 15             # 15 consecutive compliant observations close the episode
+  pos_conf: 0.40
+  neg_conf: 0.40
+  min_person_conf: 0.50
+  min_person_height_frac: 0.15
+  review_below: 0.70           # events under this confidence are flagged for human review
+
+# Where each PPE item should be, as fractions of the PERSON box (x1, y1, x2, y2). Tune per camera angle.
+ppe_regions:
+  helmet: [-0.15, -0.15, 1.15, 0.32]
+  gloves: [-0.35, 0.25, 1.35, 0.85]
+
+zones:
+  - zone_id: WELDING
+    camera_id: CAM_001
+    coords: pixel
+    reference_size: [1280, 720]          # resolution the polygon was drawn on; scaled to the live frame size
+    polygon: [[100, 200], [900, 200], [900, 700], [100, 700]]
+    rules:
+      - {id: R-WELD-HELMET, type: PPE_REQUIRED, item: helmet, description: "Helmet mandatory in welding area"}
+      - {id: R-WELD-GLOVES, type: PPE_REQUIRED, item: gloves, inferred_absence: false,
+         description: "Gloves mandatory in welding area (only violated on explicit no_gloves detections)"}
+
+  - zone_id: PRESS_RESTRICTED
+    camera_id: CAM_001
+    coords: normalized
+    polygon: [[0.70, 0.10], [0.98, 0.10], [0.98, 0.95], [0.70, 0.95]]
+    rules:
+      - {id: R-PRESS-ENTRY, type: RESTRICTED_ENTRY, confirm: {n: 5, m: 6}, description: "No entry while press is active"}
+
+  - zone_id: FLOOR_ALL                    # whole frame, any camera
+    camera_id: "*"
+    rules:
+      - {id: R-FLOOR-VEST, type: PPE_REQUIRED, item: vest, description: "High-visibility vest on the shop floor"}
+      - {id: R-FLOOR-HAZARD, type: HAZARD, hazard_classes: [fire, smoke], confirm: {n: 3, m: 5},
+         pos_conf: 0.55, cooldown_s: 300, description: "Fire or smoke detected"}

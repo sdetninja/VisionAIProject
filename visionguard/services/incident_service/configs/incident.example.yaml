@@ -1,0 +1,11 @@
+db_path: data/incidents.db
+evidence_dir: data/evidence
+merge_window_sec: 10
+max_evidence_frames: 3
+draw_boxes: true
+blur_faces: false
+frame_source_url: ""        # e.g. http://localhost:8001  (M1 API); empty = no evidence images
+bus: jsonl                  # jsonl | memory
+bus_path: data/bus/events.jsonl
+outbox_max_attempts: 5
+review_required_types: []   # e.g. [HAZARD_DETECTED] to force human review of every hazard

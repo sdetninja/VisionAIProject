@@ -1,0 +1,12 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pyyaml
+numpy
+opencv-python          # use opencv-python-headless in Docker / servers without a display
+supervision>=0.21      # ByteTrack implementation
+prometheus-client
+ultralytics>=8.3       # YOLO11 (pulls in torch)
+# --- dev / test ---
+pytest
+httpx

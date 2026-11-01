@@ -1,0 +1,4 @@
+pyyaml
+fastapi>=0.110        # optional: only for the HTTP service (app.py)
+uvicorn[standard]     # optional
+pytest

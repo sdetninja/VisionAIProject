@@ -1,0 +1,73 @@
+groups:
+- name: visionguard-safety-path
+  rules:
+  # The most important alert: a silent pipeline looks identical to a safe factory.
+  - alert: CameraDown
+    expr: vg_camera_up == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations: {summary: "Camera {{ $labels.camera_id }} is not delivering frames", impact: "No safety monitoring for this camera"}
+  - alert: PipelineNotProcessingFrames
+    expr: rate(vg_frames_processed_total[5m]) == 0 and on(camera_id) vg_camera_up == 1
+    for: 5m
+    labels: {severity: critical}
+    annotations: {summary: "Camera {{ $labels.camera_id }} connected but no frames processed"}
+  - alert: FrameDropRateHigh
+    expr: rate(vg_frames_dropped_total[5m]) / clamp_min(rate(vg_frames_captured_total[5m]), 0.001) > 0.2
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.camera_id }} dropping >20% of frames (detector too slow?)"}
+  - alert: InferenceSlow
+    expr: histogram_quantile(0.95, sum by (le, camera_id) (rate(vg_inference_seconds_bucket[5m]))) > 0.08
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "Inference p95 above the 80 ms budget on {{ $labels.camera_id }}"}
+  - alert: ServiceDown
+    expr: up{job="visionguard"} == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.service }} is unreachable (metrics scrape failing)"}
+  - alert: OutboxDeadLetters
+    expr: vg_incident_outbox{state="dead"} > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "Incident events failed to publish and need operator action (POST /outbox/requeue-dead)", impact: "Downstream alerts may never be sent"}
+  - alert: OutboxBacklog
+    expr: vg_incident_outbox{state="pending"} > 50
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "Outbox backlog growing"}
+  - alert: NotificationsDead
+    expr: vg_notifications{status="DEAD"} > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "Notifications exhausted retries - nobody was told", impact: "Safety incident may be unseen"}
+  - alert: IncidentsUnreviewed
+    expr: vg_incident_oldest_open_age_seconds > 1800
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "An incident has been OPEN >30 min without review"}
+- name: visionguard-quality
+  rules:
+  - alert: GatewayErrors
+    expr: sum(rate(vg_http_requests_total{service="gateway",status=~"5.."}[5m])) / clamp_min(sum(rate(vg_http_requests_total{service="gateway"}[5m])), 0.01) > 0.05
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "Gateway 5xx rate >5%"}
+  - alert: GatewayAuthFailuresSpike
+    expr: sum(rate(vg_http_requests_total{service="gateway",status="401"}[5m])) > 1
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "Sustained 401s at the gateway (credential stuffing or an expired-token loop)"}
+  - alert: LowReviewPrecision
+    expr: |
+      sum(increase(vg_review_labels_total{label="false_positive"}[24h]))
+        / clamp_min(sum(increase(vg_review_labels_total[24h])), 1) > 0.5
+      and sum(increase(vg_review_labels_total[24h])) >= 20
+    labels: {severity: warning}
+    annotations: {summary: ">50% of reviewed incidents were false positives in 24h", action: "Review rule thresholds (M8 feedback --labels)"}
+  - alert: LLMFallbackHigh
+    expr: vg_agent_events_total{kind="fallback"} / clamp_min(vg_agent_events_total{kind="analyzed"}, 1) > 0.3
+    for: 30m
+    labels: {severity: info}
+    annotations: {summary: "Over 30% of analyses fell back to the template (LLM output rejected by guardrails)"}

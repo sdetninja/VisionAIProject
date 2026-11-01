@@ -1,0 +1,28 @@
+# Laptop webcam demo. Until you have the fine-tuned PPE model, yolo11n.pt (COCO) detects `person` only.
+cameras:
+  - camera_id: CAM_001
+    source: 0
+    target_fps: 10
+    max_width: 1280
+
+model:
+  weights: yolo11n.pt            # replace with runs/ppe-yolo-v0/weights/best.pt from Milestone 0
+  version: yolo11n-coco
+  conf: 0.30
+  imgsz: 640
+  keep_classes: [person]         # remove this line once using the PPE model
+
+tracker:
+  track_classes: [person, forklift, truck]
+  lost_buffer: 30
+
+buffer:
+  seconds: 30
+  jpeg_quality: 90
+
+# hazard_model:                  # separate fire/smoke model from Milestone 0
+#   weights: runs/hazard-yolo-v0/weights/best.pt
+#   version: hazard-yolo-v0
+#   conf: 0.45
+
+jsonl_dir: out/results            # every TrackResult is appended to out/results/<camera_id>.jsonl

@@ -1,0 +1,11 @@
+# Replay a recorded clip (good for repeatable demos and the end-to-end replay tests later).
+cameras:
+  - camera_id: CAM_001
+    source: samples/factory.mp4
+    target_fps: 10
+    realtime: false              # process every sampled frame, never drop
+model:
+  weights: yolo11n.pt
+  version: yolo11n-coco
+  keep_classes: [person]
+jsonl_dir: out/results

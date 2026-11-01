@@ -1,0 +1,49 @@
+# Copy to .github/workflows/ci.yml at the repository root (adjust the working-directory prefix if visionguard/ is the root).
+name: ci
+on: [push, pull_request]
+permissions: {contents: read}
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy: {matrix: {svc: [rule_engine, incident_service, agent_service, notification_service, backend_api, vision_pipeline]}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r visionguard/services/${{ matrix.svc }}/requirements.txt ./visionguard/ops
+      - run: cd visionguard/services/${{ matrix.svc }} && pytest -q
+  ops-and-mlops:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pytest pyyaml ./visionguard/ops
+      - run: cd visionguard/ops && pytest -q
+      - run: cd visionguard/mlops && pip install -r requirements.txt && pytest -q
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: cd visionguard/dashboard && npm ci && npm test && npm run build
+  config-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD/visionguard/ops/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v2.53.0 check rules /p/alerts.yml
+      - run: cd visionguard/ops/deploy && cp .env.example .env && mkdir -p secrets && echo x > secrets/grafana_admin.txt && docker compose config -q
+  image-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f visionguard/ops/deploy/Dockerfile.service --build-arg SERVICE=backend_api -t vg/gateway visionguard
+      - uses: aquasecurity/trivy-action@0.24.0
+        with: {image-ref: vg/gateway, severity: "CRITICAL,HIGH", exit-code: "1", ignore-unfixed: true}
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: gitleaks/gitleaks-action@v2

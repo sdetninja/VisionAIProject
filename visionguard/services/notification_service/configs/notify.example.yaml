@@ -1,0 +1,16 @@
+dashboard_url: http://localhost:3000
+db_path: data/notify.db
+analysis_wait_sec: 30        # send as UNRATED if the AI analysis hasn't arrived
+rate_limit_per_min: 20
+channels:
+  console: {type: console}
+  log:     {type: jsonl, path: data/notifications.jsonl}
+  slack:   {type: slack, webhook_url_env: SLACK_WEBHOOK_URL}       # secret lives in env, not here
+  mail:    {type: email, host: smtp.example.com, to: [safety@example.com], sender: visionguard@example.com}
+routes:                       # first-notice routing; every matching rule fires
+  - {name: everything, match: {}, channels: [log]}
+  - {name: high-and-up, match: {min_severity: HIGH}, channels: [slack, mail]}
+  - {name: unrated, match: {severity: [UNRATED]}, channels: [slack]}
+escalations:                  # fire if not acknowledged (UNDER_REVIEW/CONFIRMED) after N minutes
+  - {name: supervisor-15m, after_min: 15, match: {min_severity: HIGH}, channels: [slack]}
+  - {name: manager-30m,    after_min: 30, match: {severity: [CRITICAL]}, channels: [mail]}

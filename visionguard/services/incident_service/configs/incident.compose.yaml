@@ -1,0 +1,10 @@
+# Used by ops/deploy/docker-compose.yml (paths are inside the shared /data volume)
+db_path: /data/incidents.db
+evidence_dir: /data/evidence
+merge_window_sec: 10
+max_evidence_frames: 3
+draw_boxes: true
+frame_source_url: ""
+bus: jsonl
+bus_path: /data/bus/events.jsonl
+outbox_max_attempts: 5

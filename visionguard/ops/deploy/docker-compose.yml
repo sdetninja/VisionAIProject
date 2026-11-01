@@ -1,0 +1,70 @@
+# Run from visionguard/ops/deploy :  cp .env.example .env  &&  docker compose up --build
+# MVP topology: one host, SQLite + JSONL bus on a shared volume. Not HA - see README "Production gaps".
+x-svc: &svc
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  env_file: .env
+  volumes: [vgdata:/data]
+  networks: [internal]
+  logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+x-build: &build
+  context: ../..
+
+services:
+  rule-engine:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: rule_engine}}
+    command: ["python","-m","rule_engine","--config","configs/rules.example.yaml","--input","/data/results/CAM_001.jsonl","--output","/data/bus/rule_events.jsonl","--follow","--metrics-port","9100"]
+  incident-worker:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: incident_service}}
+    command: ["python","-m","incident_service","--config","/app/configs/incident.compose.yaml","--input","/data/bus/rule_events.jsonl","--follow","--metrics-port","9100"]
+  incident-api:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: incident_service}}
+    environment: {INCIDENT_CONFIG: /app/configs/incident.compose.yaml, INCIDENT_OUTBOX: "0"}   # worker owns the outbox; one publisher only
+    command: ["uvicorn","incident_service.app:create_app","--factory","--host","0.0.0.0","--port","8003"]
+  agent-worker:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: agent_service}}
+    command: ["python","-m","agent_service","--bus","/data/bus/events.jsonl","--kb","knowledge_base","--out","/data/bus/analyses.jsonl","--db","/data/agent.db","--follow","--metrics-port","9100"]
+  notification-worker:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: notification_service}}
+    command: ["python","-m","notification_service","--config","/app/configs/notify.example.yaml","--bus","/data/bus/events.jsonl","--bus","/data/bus/analyses.jsonl","--follow","--metrics-port","9100"]
+  gateway:
+    <<: *svc
+    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: backend_api}}
+    environment: {VG_INCIDENT_URL: "http://incident-api:8003", VG_AUDIT_DB: /data/audit.db}
+    command: ["uvicorn","backend_api.app:create_app","--factory","--host","0.0.0.0","--port","8000"]
+    ports: ["127.0.0.1:8000:8000"]          # the ONLY service published to the host, and only on loopback; put TLS in front
+    networks: [internal, edge]
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    networks: [internal]
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    environment: {GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin, GF_USERS_ALLOW_SIGN_UP: "false"}
+    secrets: [grafana_admin]
+    volumes: [./grafana/provisioning:/etc/grafana/provisioning:ro, ./grafana/dashboards:/var/lib/grafana/dashboards:ro]
+    ports: ["127.0.0.1:3001:3000"]
+    networks: [internal]
+
+secrets:
+  grafana_admin: {file: ./secrets/grafana_admin.txt}
+volumes: {vgdata: {}, promdata: {}}
+networks:
+  internal: {internal: true}   # no outbound internet: Slack/email/LLM egress needs an explicit egress proxy (see README)
+  edge: {}

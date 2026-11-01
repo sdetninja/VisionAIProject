@@ -1,0 +1,13 @@
+# Build from visionguard/ :  docker build -f ops/deploy/Dockerfile.service --build-arg SERVICE=incident_service -t vg/incident .
+FROM python:3.11-slim AS base
+ARG SERVICE
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 VG_LOG_FORMAT=json
+RUN useradd -r -u 10001 vg && mkdir /app /data && chown vg /data
+WORKDIR /app
+COPY ops /tmp/ops
+COPY services/${SERVICE}/requirements.txt /tmp/req.txt
+# test-only deps (pytest/httpx) are harmless but unnecessary; strip them from the runtime image
+RUN grep -v -i -E '^(pytest|httpx)' /tmp/req.txt > /tmp/req.run && pip install --no-cache-dir -r /tmp/req.run /tmp/ops && rm -rf /tmp/ops /tmp/req*
+COPY services/${SERVICE}/ /app/
+USER vg
+VOLUME /data

@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]
+pyyaml
+pytest
+httpx            # tests (TestClient)
+# optional: OIDC / RS256 tokens from your IdP (Keycloak, Entra ID, Okta)
+# pyjwt[crypto]

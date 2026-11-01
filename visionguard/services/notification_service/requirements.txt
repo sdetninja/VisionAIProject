@@ -1,0 +1,6 @@
+pyyaml
+fastapi>=0.110
+uvicorn[standard]
+httpx
+pytest
+# email/slack/webhook use only the standard library (smtplib, urllib)

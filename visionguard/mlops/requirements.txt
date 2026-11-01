@@ -1,0 +1,7 @@
+pyyaml
+numpy
+pytest
+# training / evaluation (lazy-imported; not needed for registry, gates, feedback, drift)
+# ultralytics
+# mlflow          # optional experiment tracking (set MLFLOW_TRACKING_URI)
+# dvc             # dataset/weights versioning (see dvc.yaml)

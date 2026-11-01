@@ -1,0 +1,6 @@
+# overrides for GateConfig (all optional)
+latency_budget_ms: 80
+max_recall_drop: 0.03
+max_recall_drop_critical: 0.01
+min_staging_hours: 24
+# required_classes: [person, helmet, no_helmet, vest]   # only classes whose rules are ENABLED (deferred classes excluded)

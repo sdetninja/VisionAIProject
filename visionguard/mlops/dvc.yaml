@@ -1,0 +1,14 @@
+# Reproducible pipeline (run from this folder; milestone0 scripts do the heavy lifting). `dvc repro`.
+stages:
+  prepare:
+    cmd: python ../milestone0/scripts/03_prepare_dataset.py --config ../milestone0/configs/sources_ppe.yaml
+    deps: [../milestone0/configs/sources_ppe.yaml, ../milestone0/data/raw]
+    outs: [../milestone0/data/processed/ppe]
+  audit:
+    cmd: python -m vg_mlops audit-data --data-root ../milestone0/data/processed/ppe --out reports/dataset_summary.json
+    deps: [../milestone0/data/processed/ppe]
+    metrics: [reports/dataset_summary.json]
+  train:
+    cmd: python ../milestone0/scripts/06_train_baseline.py --data ../milestone0/data/processed/ppe/data.yaml --name ppe-yolo-ci --epochs 50
+    deps: [../milestone0/data/processed/ppe, reports/dataset_summary.json]
+    outs: [runs/ppe-yolo-ci/weights/best.pt]

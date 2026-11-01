@@ -1,0 +1,10 @@
+pyyaml
+fastapi>=0.110
+uvicorn[standard]
+httpx
+pytest
+# optional
+# anthropic          # AnthropicLLM (LLM explanation; system works without it)
+# qdrant-client      # vector retrieval (BM25 used by default)
+# sentence-transformers
+# langgraph          # not required; the pipeline is a plain ordered graph
