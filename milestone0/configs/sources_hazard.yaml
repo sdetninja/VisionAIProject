@@ -16,7 +16,7 @@ sources:
     split: auto
     map: {fire: fire, smoke: smoke}
 
-  - name: own_hazard_negatives
-    path: data/raw/own_hazard_negatives   # frames of factory scenes WITHOUT fire (welding arcs, steam, orange vests)
-    split: test_heavy
-    map: {fire: fire, smoke: smoke}
+#  - name: own_hazard_negatives
+#    path: data/raw/own_hazard_negatives   # frames of factory scenes WITHOUT fire (welding arcs, steam, orange vests)
+#    split: test_heavy
+#    map: {fire: fire, smoke: smoke}

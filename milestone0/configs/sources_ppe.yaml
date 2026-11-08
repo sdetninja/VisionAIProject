@@ -51,35 +51,35 @@ sources:
       goggles: goggles
       no_goggle: goggles          # NOTE: "no goggles" mapped away intentionally; remove if you add a no_goggles class
 
-  - name: roboflow_ppe_1
-    path: data/raw/roboflow_ppe_1
-    split: auto
-    map:
-      person: person
-      hardhat: helmet
-      no-hardhat: no_helmet
-      safety vest: vest
-      no-safety vest: no_vest
-      mask: mask
-
-  - name: own_camera
-    path: data/raw/own_camera     # your labeled frames (export from CVAT as "YOLO 1.1")
-    split: test_heavy
-    map:
-      person: person
-      helmet: helmet
-      no_helmet: no_helmet
-      vest: vest
-      no_vest: no_vest
-      gloves: gloves
-      no_gloves: no_gloves
-      goggles: goggles
-      mask: mask
-      forklift: forklift
-      truck: truck
-
-  - name: synthetic_copy_paste
-    path: data/synthetic/ppe
-    split: train_only
-    map: {person: person, helmet: helmet, no_helmet: no_helmet, vest: vest, no_vest: no_vest,
-          gloves: gloves, no_gloves: no_gloves, goggles: goggles, mask: mask}
+#  - name: roboflow_ppe_1
+#    path: data/raw/roboflow_ppe_1
+#    split: auto
+#    map:
+#      person: person
+#      hardhat: helmet
+#      no-hardhat: no_helmet
+#      safety vest: vest
+#      no-safety vest: no_vest
+#      mask: mask
+#
+#  - name: own_camera
+#    path: data/raw/own_camera     # your labeled frames (export from CVAT as "YOLO 1.1")
+#    split: test_heavy
+#    map:
+#      person: person
+#      helmet: helmet
+#      no_helmet: no_helmet
+#      vest: vest
+#      no_vest: no_vest
+#      gloves: gloves
+#      no_gloves: no_gloves
+#      goggles: goggles
+#      mask: mask
+#      forklift: forklift
+#      truck: truck
+#
+#  - name: synthetic_copy_paste
+#    path: data/synthetic/ppe
+#    split: train_only
+#    map: {person: person, helmet: helmet, no_helmet: no_helmet, vest: vest, no_vest: no_vest,
+#          gloves: gloves, no_gloves: no_gloves, goggles: goggles, mask: mask}

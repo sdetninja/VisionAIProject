@@ -1,0 +1,13 @@
+milestone0/data/
+milestone0/runs/
+venv
+.idea
+# generated artifacts
+.venv/
+__pycache__/
+.pytest_cache/
+*.pt
+runs/
+mlruns/
+mlflow.db
+visionguard/services/vision_pipeline/out/
