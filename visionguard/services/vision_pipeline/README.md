@@ -16,8 +16,12 @@ Webcam/RTSP/MP4 ─► CameraReader thread ─► bounded queue (drop-oldest) �
 cd visionguard/services/vision_pipeline
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest -q                         # tests use a fake detector: no model/GPU needed
+pytest -q                         # 9 tests; they use a fake detector: no model/GPU needed
 ```
+Verified 2026-11-08 on macOS / Python 3.12: torch 2.15, ultralytics 8.4, supervision 0.29.1; YOLO runs on `mps` at ~16–20 ms/frame.
+
+> `supervision` is pinned `<0.30`: `sv.ByteTrack` was deprecated in 0.28 and removed in 0.30+.
+> 0.29 still works but logs a one-time `FutureWarning`. Long-term fix: port `tracker.py` to Roboflow's `trackers` package.
 
 ## Run
 ```bash
@@ -31,6 +35,9 @@ open http://localhost:8001/cameras/CAM_001/stream      # annotated MJPEG preview
 # 3. Replay a recorded clip deterministically (no frame drops)
 python -m vision_pipeline --config configs/pipeline.video.yaml --print
 ```
+`samples/factory.mp4` is not in the repo: drop any clip there (or point `source:` at another file) before using
+`pipeline.video.yaml`. For the API with a file source, set `realtime: true` and `loop: true` so the camera stays up.
+
 First run downloads `yolo11n.pt`. With COCO weights only `person` is detected; switch `model.weights` to
 `runs/ppe-yolo-v0/weights/best.pt` (Milestone 0) and delete `keep_classes` to get PPE classes.
 Docker: `docker build -t vg-vision .` works for RTSP/files; a laptop webcam is not reachable from Docker on macOS, so run the webcam demo natively.
@@ -60,6 +67,15 @@ Track IDs are anonymous and scoped to camera + session.
 ## Hooking up M2 (Rule Engine)
 In-process: `pipeline.add_sink(CallbackSink(rule_engine.on_track_result))`. Later: replace with a bus/gRPC sink implementing `ResultSink.emit`.
 Evidence: M3 calls `FrameBuffer.get(camera_id, frame_id)`; swap `InMemoryFrameBuffer` for a Redis implementation when M3 is a separate process.
+
+## Troubleshooting
+| Symptom | Cause / fix |
+|---|---|
+| `AttributeError: module 'supervision' has no attribute 'ByteTrack'` | supervision ≥ 0.30 installed. `pip install "supervision>=0.21,<0.30"` |
+| `cannot open 'samples/factory.mp4', retrying…` forever | Sample clip missing, see *Run* above |
+| Webcam: `cannot open 0` | Grant camera access to your terminal app (System Settings → Privacy & Security → Camera), then restart the terminal |
+| Only `person` detected | Using COCO `yolo11n.pt` with `keep_classes: [person]`. Switch to the M0 PPE weights |
+| `/health` returns non-ok | No camera is in `running` state. Check `GET /cameras` for `reconnecting` / `finished` |
 
 ## Design notes / known limits
 - Live sources drop the **oldest** queued frame when the consumer is slow (counted in `vg_frames_dropped_total`); files with `realtime: false` block instead.

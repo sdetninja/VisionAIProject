@@ -47,8 +47,9 @@ class YoloDetector:
         self.infer(np.zeros((cfg.imgsz, cfg.imgsz, 3), np.uint8))   # warm-up
 
     def infer(self, frame_bgr: np.ndarray) -> list[Detection]:
+        extra = {"half": True} if self.half else {}   # newer ultralytics warns on every call if half is passed
         r = self.model.predict(frame_bgr, conf=self.cfg.conf, iou=self.cfg.iou, imgsz=self.cfg.imgsz,
-                               device=self.device, half=self.half, verbose=False)[0]
+                               device=self.device, verbose=False, **extra)[0]
         if r.boxes is None or len(r.boxes) == 0:
             return []
         xyxy = r.boxes.xyxy.cpu().numpy()
