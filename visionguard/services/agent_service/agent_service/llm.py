@@ -23,9 +23,11 @@ class TemplateLLM:
 
 
 class AnthropicLLM:  # pragma: no cover - needs network/API key
-    def __init__(self, model="claude-sonnet-4-5", max_tokens=600):
+    # Sonnet 5.5 thinks adaptively by default (it cannot be disabled with {type: "disabled"}), and thinking tokens
+    # count towards max_tokens, so leave generous headroom; low effort is enough for phrasing a short JSON summary.
+    def __init__(self, model="claude-sonnet-5-5", max_tokens=16000, effort="low"):
         import anthropic
-        self.c, self.model, self.max_tokens = anthropic.Anthropic(), model, max_tokens
+        self.c, self.model, self.max_tokens, self.effort = anthropic.Anthropic(), model, max_tokens, effort
 
     def explain(self, facts, passages):
         prompt = (
@@ -33,8 +35,18 @@ class AnthropicLLM:  # pragma: no cover - needs network/API key
             "do not invent rules, do not assign blame to the person. Reply with JSON only: "
             '{"summary": str, "recommended_actions": [str], "citations": [passage ids you used]}.\n'
             f"FACTS:\n{json.dumps(facts, default=str)}\nPASSAGES:\n{json.dumps(passages)}")
-        r = self.c.messages.create(model=self.model, max_tokens=self.max_tokens, messages=[{"role": "user", "content": prompt}])
-        return r.content[0].text
+        r = self.c.beta.messages.create(
+            model=self.model, max_tokens=self.max_tokens,
+            output_config={"effort": self.effort},
+            betas=["server-side-fallback-2026-07-01"], fallbacks="default",   # server re-runs a safety decline on a fallback model
+            messages=[{"role": "user", "content": prompt}])
+        # Any exception here makes the pipeline use the deterministic template instead.
+        if r.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError(f"LLM stopped: {r.stop_reason}")
+        text = next((b.text for b in r.content if b.type == "text"), None)   # content may start with a thinking block
+        if text is None:
+            raise RuntimeError("LLM returned no text block")
+        return text
 
 
 def make_llm(kind: str) -> LLM:

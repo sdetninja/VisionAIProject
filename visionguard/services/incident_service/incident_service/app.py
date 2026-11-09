@@ -4,12 +4,22 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from pydantic import BaseModel
+
 from . import models as M
+
+
+# Must live at module level: with `from __future__ import annotations` FastAPI resolves the `body: Review`
+# annotation from module globals; a class defined inside create_app() is not found and `body` silently
+# becomes a required query parameter (every review request -> 422).
+class Review(BaseModel):
+    action: str
+    actor: str
+    comment: Optional[str] = None
 
 
 def create_app(cfg=None, service=None, publisher=None):
     from fastapi import FastAPI, HTTPException, Response
-    from pydantic import BaseModel
     from .config import Config
     from .factory import build
 
@@ -23,11 +33,6 @@ def create_app(cfg=None, service=None, publisher=None):
         register_incident(service, _reg)
     except ImportError:
         pass
-
-    class Review(BaseModel):
-        action: str
-        actor: str
-        comment: Optional[str] = None
 
     @app.on_event("startup")
     def _start():

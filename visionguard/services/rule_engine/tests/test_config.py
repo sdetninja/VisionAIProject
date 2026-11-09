@@ -28,3 +28,7 @@ def test_invalid_configs_fail_loudly():
     assert _bad(z([], polygon=[[0, 0], [1, 1]]))                                   # < 3 points
     assert _bad(z([], polygon=[[0, 0], [2, 0], [2, 2]], coords="normalized"))      # outside 0..1
     assert not _bad(z([{"id": "r", "type": "PPE_REQUIRED", "item": "helmet"}]))
+    hz = lambda cc: z([{"id": "h", "type": "HAZARD", "hazard_classes": ["fire"], "class_conf": cc}])   # noqa: E731
+    assert _bad(hz({"smoke": 0.3}))                                                # class not in hazard_classes
+    assert _bad(hz({"fire": 0}))                                                   # out of (0, 1]
+    assert not _bad(hz({"fire": 0.2}))

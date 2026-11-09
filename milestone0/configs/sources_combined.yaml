@@ -1,0 +1,80 @@
+# Combined PPE + fire/smoke model (one .pt). Built by scripts/08_build_combined.py.
+# Research / internal use only: SH17 is CC BY-NC-SA 4.0 (non-commercial); construction-ppe and YOLO are AGPL-3.0;
+# hf_ppe (jhboyo/ppe-dataset) is MIT; D-Fire images keep their original providers' terms.
+#
+# Every source only labels SOME classes. For a single model that is dangerous: an unlabelled helmet teaches the model
+# "this is background". So for each source we list what it labels (`labels`), what we derive from its own boxes
+# (`derive`), and what we fill in with a teacher model (`pseudo`). Classes in none of these are assumed absent
+# (e.g. fire in PPE photos), which is true for almost every image.
+
+output_dir: data/processed/combined
+seed: 42
+
+classes: [person, helmet, no_helmet, vest, gloves, no_gloves, goggles, mask, fire, smoke]
+
+teachers:
+  coco: yolo11l.pt                                   # COCO model, used only for `person`
+  ppe: ../runs/detect/runs/ppe-yolo-v0/weights/best.pt
+pseudo_conf: 0.5                                     # teacher boxes below this confidence are not added
+
+sources:
+  - name: construction_ppe                           # Ultralytics construction-ppe (AGPL-3.0), YOLO txt, own splits
+    format: yolo
+    path: data/raw/construction_ppe
+    splits: {train: images/train, val: images/val, test: images/test}
+    take: {train: all, val: all, test: all}
+    map: {Person: person, helmet: helmet, no_helmet: no_helmet, vest: vest, gloves: gloves, no_gloves: no_gloves, goggles: goggles}
+
+  - name: sh17                                       # SH17 Roboflow COCO export; `_aug` copies are skipped
+    format: coco
+    path: data/raw/sh17
+    splits: {train: train, val: valid, test: valid}  # export's test split has 1 image: valid is split 50/50 into val/test
+    take: {train: 2600, val: 300, test: 400}
+    prefer: [Helmet, Safety-vest, Gloves, Face-mask-medical]   # train sample favours images that show PPE (SH17 is mostly street photos)
+    # The "SH17 - v1 2025-10-31" Roboflow export has SHUFFLED category names (checked visually on crops of every class,
+    # 2026-11-08). Export name -> what the boxes really contain. Re-check if you re-export the dataset.
+    relabel:
+      Ear: Foot
+      Earmuffs: Tools
+      Face: Earmuffs
+      Face-guard: Face-mask-medical
+      Face-mask-medical: Face-guard
+      Foot: Helmet
+      Glasses: Face
+      Gloves: Gloves
+      Hands: Glasses
+      Head: Ear
+      Helmet: Shoes
+      Medical-suit: Safety-suit
+      Person: Person
+      Safety-suit: Safety-vest
+      Safety-vest: Head
+      Shoes: Hands
+      Tools: Medical-suit
+    map: {Person: person, Helmet: helmet, Safety-vest: vest, Gloves: gloves, Glasses: goggles, Face-mask-medical: mask}
+    derive:                                          # SH17 labels every Head/Hand, never "no helmet"/"no gloves"
+      no_helmet: {from: Head, unless_overlaps: Helmet}
+      no_gloves: {from: Hands, unless_overlaps: Gloves}
+
+  - name: hf_ppe                                     # huggingface.co/datasets/jhboyo/ppe-dataset (MIT), seeded subset
+    format: yolo
+    path: data/raw/hf_ppe
+    splits: {train: train/images, val: val/images, test: test/images}
+    take: {train: 1900, val: 250, test: all}
+    # The set merges two Kaggle sets with DIFFERENT gaps: ds1_* (Hard Hat Workers) labels helmet + head but never vest;
+    # ds2_* (Safety Helmet & Reflective Jacket) labels helmet + vest but never bare heads. Unlabelled bare heads would teach
+    # "no_helmet = background", so only ds1 is used and its missing vest/gloves come from the PPE teacher.
+    include: ["ds1_*"]
+    names: [helmet, head, vest]
+    map: {helmet: helmet, head: no_helmet, vest: vest}
+    pseudo: {coco: [person], ppe: [vest, gloves]}
+
+  - name: d_fire                                     # github.com/gaiasd/DFireDataset, pre-split download
+    format: yolo
+    path: data/raw/d_fire
+    splits: {train: data/train/images, val: data/val/images, test: data/test/images}   # Kaggle repack: 14122/3099/4306
+    take: {train: 2400, val: 300, test: 400}
+    background_fraction: 0.15                        # share of fire/smoke-free images (glare, sunsets, lights)
+    names: [smoke, fire]                             # 0=smoke 1=fire, checked on rendered crops 2026-11-09
+    map: {smoke: smoke, fire: fire}
+    pseudo: {coco: [person]}

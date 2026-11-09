@@ -31,6 +31,9 @@ def main():
     ap.add_argument("--fraction", type=float, default=1.0)
     ap.add_argument("--device", default=None)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--time", type=float, default=None,
+                    help="hard training budget in hours; overrides --epochs and fits the LR schedule to it")
+    ap.add_argument("--close-mosaic", type=int, default=10, help="final epochs without mosaic (use ~5 for short runs)")
     a = ap.parse_args()
 
     from ultralytics import YOLO, settings
@@ -47,7 +50,8 @@ def main():
         patience=15, seed=42, deterministic=True, plots=True,
         # augmentations suited to CCTV: lighting/colour jitter, mosaic, mild scale, NO vertical flip
         hsv_h=0.015, hsv_s=0.6, hsv_v=0.4, degrees=5, translate=0.1, scale=0.5,
-        fliplr=0.5, flipud=0.0, mosaic=1.0, close_mosaic=10,
+        fliplr=0.5, flipud=0.0, mosaic=1.0, close_mosaic=a.close_mosaic,
+        **({"time": a.time} if a.time else {}),
     )
     print(f"Best weights: runs/{a.name}/weights/best.pt")
 

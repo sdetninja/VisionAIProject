@@ -27,7 +27,8 @@ Sign in by pasting a dev token: `python -m backend_api token --sub alice --role 
 - A false-positive verdict requires a comment (it becomes a training label in M8).
 
 ## Not done / limits
-- **Components (`.jsx`) and CSS have not been compiled or run** (no network → no React/Vite here). Only the pure logic is tested. Expect small fixes on first `npm run dev`; please send me any console errors.
+- Verified 2026-11-08 (Node 26, Vite 5.4): `npm test` 9/9, `npm run build` clean, and `npm run dev` driven in a browser against the live M1/M3/M4/M5/M6 stack: login, queue, incident detail with the Claude analysis, review (start → under review, false positive blocked without a comment), Cameras, Notifications, Admin audit log (`chain intact`), no console errors. Still no component tests.
+- npm 11 warns that `esbuild`'s install script was not run; the build works without it (the platform binary ships as an optional dependency).
 - No live video / bounding-box overlay yet (gateway has no stream proxy).
 - No SSO login screen, no i18n, no accessibility audit, no component tests (add Vitest + Testing Library next).
 - Queue sorts by newest; severity sorting needs M3 to store severity from M4.

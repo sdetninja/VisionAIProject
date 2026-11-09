@@ -2,12 +2,13 @@
 import argparse, os, time
 from .auth import HS256Verifier
 from .config import Settings
+from .rbac import PERMISSIONS
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["token"])
-    ap.add_argument("--sub", required=True); ap.add_argument("--role", required=True)
+    ap.add_argument("--sub", required=True); ap.add_argument("--role", required=True, choices=sorted(PERMISSIONS))   # a typo like "reviewer." fails here, not at login
     ap.add_argument("--cameras", nargs="*"); ap.add_argument("--hours", type=float, default=8)
     a = ap.parse_args()
     s = Settings.from_env()

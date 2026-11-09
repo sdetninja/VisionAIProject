@@ -87,7 +87,8 @@ class RuleEngine:
 
     def _hazard(self, frame, zone: Zone, rule: Rule, events, obs_log):
         for hc in rule.hazard_classes:
-            hits = [d for d in frame.hazards + frame.ppe if d.cls == hc and d.conf >= rule.pos_conf
+            thr = rule.class_conf.get(hc, rule.pos_conf)
+            hits = [d for d in frame.hazards + frame.ppe if d.cls == hc and d.conf >= thr
                     and zone.contains(foot_point(d.bbox), frame.width, frame.height)]
             key = (frame.camera_id, f"hazard:{hc}", zone.zone_id, rule.id)
             if hits:

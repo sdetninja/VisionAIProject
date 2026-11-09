@@ -31,4 +31,5 @@ In-process with M2: `RuleEngineSink(engine, on_event=IncidentEventSink(service))
 - SQLite is for dev/MVP (single process). Production: a PostgreSQL repository with the same methods (`db.py` is the interface), MinIO (`MinioEvidenceStore`), Kafka (`KafkaBus`). The MinIO/Kafka/HTTP-fetch paths are written but untested.
 - Grouping is serialised by an in-process lock; running several replicas needs DB-level locking (Postgres advisory lock or unique partial index).
 - Evidence retention/purge job and incident auto-close timers are not implemented yet.
-- Tested: 12 service tests (grouping, idempotency, lifecycle, outbox retry/DLQ, rollback, path traversal) pass in my sandbox with a minimal runner; `tests/test_api.py` (FastAPI) has **not been run** – please run `pytest -q` on your Mac.
+- Tested: `pytest -q` → 13 passed on macOS / Python 3.12 (2026-11-08): 12 service tests (grouping, idempotency, lifecycle, outbox retry/DLQ, rollback, path traversal) + the FastAPI flow in `tests/test_api.py`.
+- The `Review` request model must stay at module level in `app.py`: with `from __future__ import annotations`, a model defined inside `create_app()` is not resolved by FastAPI and the review endpoint returns 422 for every request.

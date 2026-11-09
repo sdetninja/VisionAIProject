@@ -25,11 +25,28 @@ KB_DIR=knowledge_base uvicorn agent_service.app:create_app --factory --port 8004
 # real LLM: pip install anthropic; export ANTHROPIC_API_KEY=...; --llm anthropic  (or LLM_KIND=anthropic)
 ```
 
+### Sample: analyse M3 incidents with Claude
+The bus file is written by M3, so run M3 first (from `incident_service/`):
+```bash
+python -m incident_service --config configs/incident.example.yaml --input ../rule_engine/out/events.jsonl
+```
+Then, from `agent_service/` with `ANTHROPIC_API_KEY` exported and `pip install "anthropic>=2.6"`:
+```bash
+python -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base --risk-config configs/risk.example.yaml --llm anthropic
+```
+Results go to `data/analyses.jsonl` (one `incident.analyzed.v1` record per line; the analysis is under `payload`).
+Check `explanation_mode`: `llm` = Claude wrote it, `template` = no API key found, `template_fallback` = the call failed or
+a guardrail rejected the answer (reason in `guardrail_problems`). The console only prints severity per incident; read the
+summary and actions from the file:
+```bash
+python -c "import json;[print(json.dumps(json.loads(l)['payload'],indent=2)) for l in open('data/analyses.jsonl')]"
+```
+
 ## You must do
 - **Replace `knowledge_base/*.md` (SAMPLE content) with your real SOPs/policies.** Format: optional `source: ID` header, `#` headings = chunks. Citations are only as good as these documents.
 - Tune `configs/risk.example.yaml` weights/thresholds with your safety officer.
 
 ## Limits
 - Retrieval is lexical BM25 (no network/embeddings needed). `QdrantRetriever` is a placeholder for semantic search once the KB grows.
-- Plain ordered pipeline rather than LangGraph (no branching needed yet). `AnthropicLLM` is written but untested (no network here); model name is a default you may change.
+- Plain ordered pipeline rather than LangGraph (no branching needed yet). `AnthropicLLM` defaults to `claude-sonnet-5-5` at `effort: low` with server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; needs `anthropic` ≥ 2.6). It was checked offline against stubbed SDK responses only and has not made a live API call yet; refusals, truncation or no text all fall back to the template.
 - Tested: 11 tests (retrieval, scoring, guardrails, fallbacks, caching, bus handling) passing here with a minimal runner; the FastAPI app and `pytest` itself were not run. Also ran M3-format JSONL → analysis end to end.

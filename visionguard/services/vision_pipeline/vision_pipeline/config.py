@@ -26,6 +26,7 @@ class ModelConfig(BaseModel):
     device: Optional[str] = None       # None = auto (cuda -> mps -> cpu)
     half: bool = False                 # FP16, CUDA only
     keep_classes: Optional[list[str]] = None   # filter model output by class name
+    class_conf: Optional[dict[str, float]] = None  # per-class min confidence, e.g. {fire: 0.2}; others use `conf`
 
 
 class TrackerConfig(BaseModel):

@@ -4,10 +4,16 @@ Goal: no model reaches the factory floor unless it beat the bar on a **frozen, l
 and it can be rolled back in one command. Reviewer verdicts improve the system without ever auto-training it.
 
 ## Status: what is and isn't verified
-- Verified: 31 unit/CLI tests pass (datasets, gates, registry, promotion, feedback, drift, CLI end-to-end). The sandbox had no
-  pytest, so I ran them with a small custom runner; please run `pytest -q` yourself.
-- NOT verified: `evaluate.py` (needs ultralytics + weights), `dvc.yaml` (paths assume the milestone0 script names and flags; check them
-  against your copies), MLflow (not integrated - the SQLite registry is the MVP; swap later).
+- Verified: `pytest -q` → 31 passed on macOS / Python 3.12 (2026-11-08).
+- Verified on real Milestone 0 data (ultralytics 8.4, `ppe-yolo-v0/best.pt`, 1087/194/135 split): `audit-data` (no leakage),
+  `freeze-test`, `evaluate.py` on the test split, `register`, `stage` (fails the full `targets.yaml`: person, no_helmet, no_gloves,
+  goggles below target; no_vest/mask/forklift/truck absent from the test split), staging with `required_classes: [helmet, vest]`,
+  promote blocked by the 24 h soak unless `--force --reason`, no-regression gate, `load_pointer` rejecting tampered weights,
+  `feedback` on labels from `GET /api/labels`, and `drift_report` on model outputs.
+- Ultralytics writes `labels/<split>.cache` next to the data; the dataset/test hashes only cover image and label files, so it does
+  not change the frozen hash.
+- NOT verified: `dvc.yaml` (paths assume the milestone0 script names and flags; check them against your copies), MLflow (not
+  integrated - the SQLite registry is the MVP; swap later).
 
 ## Layout
 - `vg_mlops/datasets.py` - sha256 manifests (image + label), per-split and whole-dataset hash, leakage check

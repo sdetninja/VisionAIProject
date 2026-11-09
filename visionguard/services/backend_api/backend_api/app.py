@@ -1,6 +1,8 @@
 """uvicorn backend_api.app:create_app --factory --port 8000
-Env: VG_JWT_SECRET (>=32 chars) [+ see config.py]. For a real IdP use OidcVerifier instead of HS256Verifier."""
-from __future__ import annotations
+Env: VG_JWT_SECRET (>=32 chars) [+ see config.py]. For a real IdP use OidcVerifier instead of HS256Verifier.
+
+NOTE: no `from __future__ import annotations` here. The route signatures below use types imported inside create_app();
+with postponed annotations FastAPI can't resolve them (e.g. 'Optional[str]') and every authenticated request fails."""
 import os
 
 

@@ -215,6 +215,17 @@ def test_hazard_fire_confirms_and_ignores_low_confidence():
     assert e["event_type"] == "HAZARD_DETECTED" and e["hazard_class"] == "fire" and e["track_id"] is None
 
 
+def test_hazard_class_conf_overrides_pos_conf_per_class():
+    rules = ("      - {id: R-H, type: HAZARD, hazard_classes: [fire, smoke], confirm: {n: 3, m: 5}, pos_conf: 0.55,"
+             " class_conf: {fire: 0.2}, cooldown_s: 10}")
+    det = lambda k, c: {"class": k, "confidence": c, "bbox": [500, 400, 600, 520]}      # noqa: E731
+    eng = RuleEngine(cfg(rules))
+    evs = run(eng, [frame(i, hazards=[det("fire", 0.25), det("smoke", 0.25)]) for i in range(1, 20)])
+    assert [e["hazard_class"] for _, e in evs] == ["fire"]                  # smoke still needs 0.55
+    eng = RuleEngine(cfg(rules))
+    assert run(eng, [frame(i, hazards=[det("fire", 0.15)]) for i in range(1, 20)]) == []
+
+
 # --- properties of the engine itself -------------------------------------------------------------------
 def test_deterministic_replay_gives_identical_events():
     a = run(RuleEngine(cfg(HELMET + "\n" + GLOVES)), seq(30, ppe=lambda p: [hand_box(p, "no_gloves", 0.8)]))

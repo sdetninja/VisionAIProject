@@ -43,7 +43,13 @@ Event types: `PPE_VIOLATION`, `RESTRICTED_AREA_ENTRY`, `HAZARD_DETECTED` (`track
 
 ## Tuning notes
 - Thresholds in `rules.example.yaml` are starting points. Tune `confirm`, `ppe_regions`, and confidence limits against Milestone 0 recall/precision and recorded footage; don't tune on the test set.
-- Hazard rules read `hazard_detections` (from the separate fire/smoke model) and use their own thresholds/cooldowns.
+- Hazard rules read `hazard_detections` (separate fire/smoke model) **and** `ppe_detections` (a combined model that
+  outputs fire/smoke alongside PPE), with their own thresholds/cooldowns.
+- `class_conf` on a HAZARD rule sets a per-class threshold that overrides `pos_conf`, e.g. `class_conf: {fire: 0.25, smoke: 0.35}`
+  (classes must be in `hazard_classes`, values in (0, 1]). Fire and smoke need different values: pick them with
+  `milestone0/scripts/09_tune_hazard_thresholds.py`, which chooses on the val split by frame-level false-alarm budget and
+  reports frame recall/false alarms (and the N-of-M estimate) on test. Low per-frame thresholds are safe only together with
+  `confirm` debouncing; hazard events below `review_below` are still flagged for human review.
 - Config errors (unknown type, n > m, bad polygon, duplicate ids) fail at load time. `PUT /rules` validates, hot-reloads, writes the file, and logs an `AUDIT` line; put real auth/RBAC in front of it (planned for the backend API).
 
 ## Known limits

@@ -43,12 +43,14 @@ class YoloDetector:
         self.model_version = cfg.version or Path(cfg.weights).stem
         self.names = {int(k): _norm(v) for k, v in self.model.names.items()}
         self.keep = {_norm(c) for c in cfg.keep_classes} if cfg.keep_classes else None
+        self.class_conf = {_norm(k): float(v) for k, v in (cfg.class_conf or {}).items()}
+        self.min_conf = min([cfg.conf, *self.class_conf.values()])   # model runs at the lowest; filtered per class below
         log.info("YOLO %s on %s, classes=%s", self.model_version, self.device, sorted(self.names.values()))
         self.infer(np.zeros((cfg.imgsz, cfg.imgsz, 3), np.uint8))   # warm-up
 
     def infer(self, frame_bgr: np.ndarray) -> list[Detection]:
         extra = {"half": True} if self.half else {}   # newer ultralytics warns on every call if half is passed
-        r = self.model.predict(frame_bgr, conf=self.cfg.conf, iou=self.cfg.iou, imgsz=self.cfg.imgsz,
+        r = self.model.predict(frame_bgr, conf=self.min_conf, iou=self.cfg.iou, imgsz=self.cfg.imgsz,
                                device=self.device, verbose=False, **extra)[0]
         if r.boxes is None or len(r.boxes) == 0:
             return []
@@ -59,6 +61,8 @@ class YoloDetector:
         for b, c, k in zip(xyxy, conf, cls):
             name = self.names.get(int(k), str(k))
             if self.keep and name not in self.keep:
+                continue
+            if c < self.class_conf.get(name, self.cfg.conf):
                 continue
             out.append(Detection(class_name=name, confidence=round(float(c), 4),
                                  bbox=[round(float(v), 1) for v in b]))

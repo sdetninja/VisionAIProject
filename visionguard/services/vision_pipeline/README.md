@@ -16,7 +16,7 @@ Webcam/RTSP/MP4 ─► CameraReader thread ─► bounded queue (drop-oldest) �
 cd visionguard/services/vision_pipeline
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest -q                         # 9 tests; they use a fake detector: no model/GPU needed
+pytest -q                         # 11 tests; they use a fake detector: no model/GPU needed
 ```
 Verified 2026-11-08 on macOS / Python 3.12: torch 2.15, ultralytics 8.4, supervision 0.29.1; YOLO runs on `mps` at ~16–20 ms/frame.
 
@@ -40,6 +40,12 @@ python -m vision_pipeline --config configs/pipeline.video.yaml --print
 
 First run downloads `yolo11n.pt`. With COCO weights only `person` is detected; switch `model.weights` to
 `runs/ppe-yolo-v0/weights/best.pt` (Milestone 0) and delete `keep_classes` to get PPE classes.
+**Per-class confidence (`model.class_conf`).** `conf` is the default minimum for every class; `class_conf` lowers (or raises)
+it for named classes, e.g. `class_conf: {fire: 0.25, smoke: 0.35}`. The model runs at the lowest of these values and each
+detection is then filtered by its own class threshold, so weak fire/smoke boxes reach the rule engine without flooding
+the tracker with weak PPE boxes. Keep each value at or below the matching rule-engine threshold (anything filtered here
+never reaches M2). Values come from `milestone0/scripts/09_tune_hazard_thresholds.py`.
+
 Docker: `docker build -t vg-vision .` works for RTSP/files; a laptop webcam is not reachable from Docker on macOS, so run the webcam demo natively.
 
 ## API

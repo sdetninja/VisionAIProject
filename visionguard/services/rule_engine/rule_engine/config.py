@@ -43,6 +43,7 @@ class Rule:
     clear_frames: int = 15                      # consecutive compliant observations that close a violation
     pos_conf: float = 0.40                      # min confidence for a PPE "present" detection
     neg_conf: float = 0.40                      # min confidence for an explicit "no_x" detection
+    class_conf: dict = field(default_factory=dict)  # HAZARD: per-class pos_conf, e.g. {fire: 0.2, smoke: 0.3}
     inferred_absence: bool = False
     on_conflict: str = "unknown"                # present AND no_x both detected: unknown | violating | compliant
     min_person_conf: float = 0.50
@@ -107,17 +108,21 @@ def _build_rule(raw: dict, defaults: dict, zone_id: str) -> Rule:
     g = lambda k, dv: raw.get(k, defaults.get(k, dv))   # noqa: E731
     item = raw.get("item", raw.get("required_item"))
     hz: tuple = ()
+    cc: dict = {}
     if rtype == PPE_REQUIRED:
         if not item:
             raise ConfigError(f"{where}: PPE_REQUIRED needs `item` (e.g. helmet)")
         item = str(item).lower()
     if rtype == HAZARD:
         hz = tuple(str(x).lower() for x in raw.get("hazard_classes", ["fire", "smoke"]))
+        cc = {str(k).lower(): float(v) for k, v in (raw.get("class_conf") or {}).items()}
+        if any(not 0 < v <= 1 for v in cc.values()) or set(cc) - set(hz):
+            raise ConfigError(f"{where}: class_conf needs values in (0, 1] for classes in hazard_classes")
     conflict = str(g("on_conflict", "unknown"))
     if conflict not in ("unknown", "violating", "compliant"):
         raise ConfigError(f"{where}: on_conflict must be unknown|violating|compliant")
     rule = Rule(
-        id=str(raw["id"]), type=rtype, item=item, hazard_classes=hz, confirm_n=n, confirm_m=m,
+        id=str(raw["id"]), type=rtype, item=item, hazard_classes=hz, class_conf=cc, confirm_n=n, confirm_m=m,
         cooldown_s=float(g("cooldown_s", 60)), clear_frames=int(g("clear_frames", 15)),
         pos_conf=float(g("pos_conf", 0.40)), neg_conf=float(g("neg_conf", 0.40)),
         inferred_absence=bool(raw.get("inferred_absence", DEFAULT_INFERRED_ABSENCE.get(item, False))),
