@@ -34,12 +34,24 @@ open http://localhost:8001/cameras/CAM_001/stream      # annotated MJPEG preview
 
 # 3. Replay a recorded clip deterministically (no frame drops)
 python -m vision_pipeline --config configs/pipeline.video.yaml --print
+# 4. Combined PPE + fire/smoke model from Milestone 0 (pair with M2's configs/rules.combined.yaml)
+python -m vision_pipeline --config configs/pipeline.combined.yaml --show --print
 ```
+`pipeline.combined.yaml` runs on `cpu` so it can share the machine with a training run; switch `device` to `mps` afterwards.
+Step-by-step M1 + M2 tests (clip and webcam) and the full stack in the UI: `visionguard/MANUAL_TESTING.md`.
+To replay a file instead: `--config configs/pipeline.combined.clip.yaml` (plays `samples/combined_demo.mp4` in real time, a 36 s clip of
+held-out test images: 0-9 s fire, 9-18 s smoke, 18-24 s missing helmets, 24-30 s compliant workers, 30-36 s no hazard).
+Point its `source:` at your own clip to test other footage.
+Verified 2026-11-09 with `combined-yolo-v2` (M1 + M2 on the demo clip): fire alarm, smoke alarm, 3 explicit helmet violations,
+no events for compliant workers; smoke-only scenes with tiny distant plumes are missed and a storm cloud scores as smoke
+(see `milestone0/reports/combined_model_report.md`). About 8 fps on CPU; `device` auto-picks mps. Clips in `samples/` are git-ignored.
+
 `samples/factory.mp4` is not in the repo: drop any clip there (or point `source:` at another file) before using
 `pipeline.video.yaml`. For the API with a file source, set `realtime: true` and `loop: true` so the camera stays up.
 
 First run downloads `yolo11n.pt`. With COCO weights only `person` is detected; switch `model.weights` to
 `runs/ppe-yolo-v0/weights/best.pt` (Milestone 0) and delete `keep_classes` to get PPE classes.
+
 **Per-class confidence (`model.class_conf`).** `conf` is the default minimum for every class; `class_conf` lowers (or raises)
 it for named classes, e.g. `class_conf: {fire: 0.25, smoke: 0.35}`. The model runs at the lowest of these values and each
 detection is then filtered by its own class threshold, so weak fire/smoke boxes reach the rule engine without flooding

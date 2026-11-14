@@ -1,0 +1,28 @@
+# Replay a video file through the combined PPE + fire/smoke model (same settings as pipeline.combined.yaml).
+# Model: 10 classes (person, helmet, no_helmet, vest, gloves, no_gloves, goggles, mask, fire, smoke).
+# Pair with ../rule_engine/configs/rules.combined.yaml (M2 reads out/results/CAM_001.jsonl).
+cameras:
+  - camera_id: CAM_001
+    source: samples/combined_demo.mp4   # any video file works; replace to test your own clip
+    realtime: true               # play at the clip's own speed (36 s), like a live camera
+    target_fps: 5
+    max_width: 1280
+
+model:
+  # v2: v1 (9 epochs) + 18 fine-tune epochs. Test mAP50 0.732 (v1: 0.636). milestone0/reports/combined_model_report.md
+  weights: /Users/raj/Desktop/VisionAIProject/runs/detect/runs/combined-yolo-v2/weights/best.pt
+  version: combined-yolo-v2
+  conf: 0.30                     # default minimum for every class
+  class_conf: {fire: 0.35, smoke: 0.35}   # milestone0/reports/hazard_thresholds_combined-yolo-v2.md; keep <= M2 values
+  imgsz: 640
+  # device: cpu                  # auto picks mps on a Mac; set cpu to keep the GPU free during a training run
+
+tracker:
+  track_classes: [person]        # the combined model has no forklift/truck classes
+  lost_buffer: 30
+
+buffer:
+  seconds: 30
+  jpeg_quality: 90
+
+jsonl_dir: out/results            # every TrackResult is appended to out/results/<camera_id>.jsonl
