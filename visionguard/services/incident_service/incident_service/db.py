@@ -56,6 +56,27 @@ def _inc(row: sqlite3.Row) -> dict:
     return d
 
 
+class _Result:
+    """Fully-read query result with the cursor methods callers use (fetchone/fetchall/iteration/lastrowid/rowcount)."""
+    __slots__ = ("rows", "lastrowid", "rowcount", "_i")
+
+    def __init__(self, rows, lastrowid, rowcount):
+        self.rows, self.lastrowid, self.rowcount, self._i = rows, lastrowid, rowcount, 0
+
+    def fetchone(self):
+        if self._i < len(self.rows):
+            self._i += 1
+            return self.rows[self._i - 1]
+        return None
+
+    def fetchall(self):
+        rest, self._i = self.rows[self._i:], len(self.rows)
+        return rest
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
 class SqliteRepository:
     def __init__(self, path: str = ":memory:"):
         if path != ":memory:":
@@ -81,8 +102,12 @@ class SqliteRepository:
                 self._conn.execute("COMMIT")
 
     def _q(self, sql, args=()):
+        # Rows are read INSIDE the lock. Returning the live cursor let another thread run a statement on the shared
+        # connection before the caller fetched, so concurrent requests (the dashboard loads evidence in parallel)
+        # intermittently saw an empty result and answered 404.
         with self._lock:
-            return self._conn.execute(sql, args)
+            cur = self._conn.execute(sql, args)
+            return _Result(cur.fetchall(), cur.lastrowid, cur.rowcount)
 
     # ---- events -------------------------------------------------------------------------------
     def event_incident(self, idempotency_key: str) -> Optional[str]:

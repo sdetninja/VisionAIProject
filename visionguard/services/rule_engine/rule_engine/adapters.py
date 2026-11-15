@@ -31,8 +31,20 @@ class JsonlEventWriter:
             f.write(json.dumps(event) + "\n")
 
 
+def _wait_for(path: str, poll_s: float):
+    import logging
+    import os
+    if not os.path.exists(path):
+        logging.getLogger("rule_engine").info("waiting for %s to appear (it is created by the upstream service)", path)
+    while not os.path.exists(path):
+        time.sleep(poll_s)
+
+
 def read_jsonl(path: str, follow: bool = False, poll_s: float = 0.2, idle_stop_s: float = 0.0) -> Iterator[dict]:
-    """Read M1's JSONL output; with follow=True behave like `tail -f` (stop after idle_stop_s of silence if > 0)."""
+    """Read M1's JSONL output; with follow=True behave like `tail -f` (stop after idle_stop_s of silence if > 0).
+    With follow=True a missing file is waited for, so M2 can be started before M1."""
+    if follow:
+        _wait_for(path, poll_s)
     with open(path) as f:
         idle = 0.0
         while True:

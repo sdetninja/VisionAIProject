@@ -13,7 +13,7 @@ STOP = {"the", "a", "an", "of", "and", "or", "to", "in", "is", "be", "for", "on"
 
 
 def tokenize(t: str) -> list:
-    return [w for w in _TOK.findall(t.lower()) if w not in STOP]
+    return [w for w in _TOK.findall(t.lower()) if len(w) > 1 and w not in STOP]   # 1-char tokens: the "R" of rule ids like R-VEST
 
 
 @dataclass

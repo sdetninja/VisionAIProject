@@ -1,7 +1,7 @@
 # M4 – Agent + RAG Service (advisory only)
 
 Consumes M3 `incident.created/updated.v1`, produces `incident.analyzed.v1`:
-severity + risk score + summary + recommended actions, **grounded in your own SOP documents**.
+severity + risk score + summary + recommended actions, **grounded in safety standards and your site procedures** (see Knowledge base).
 
 ```
 incident ─► risk.py (deterministic score/severity, audit trail)
@@ -42,11 +42,38 @@ summary and actions from the file:
 python -c "import json;[print(json.dumps(json.loads(l)['payload'],indent=2)) for l in open('data/analyses.jsonl')]"
 ```
 
+## Knowledge base (`knowledge_base/`)
+Plain-language summaries of the standards behind each detection, one `#` heading per searchable section (kept under
+700 characters, the passage size the text writer sees). Each file has a `source:` ID (what citations show), the
+official URL, and a note that it is a summary, not the official text. Sources checked 2026-11-15.
+
+| Detection | File | `source:` | Based on |
+|---|---|---|---|
+| any missing PPE | `ppe_general_osha_1910_132.md` | OSHA-1910.132 | hazard assessment, provision at no cost, training/retraining |
+| missing helmet | `head_protection_helmet_osha_1910_135.md` | OSHA-1910.135 | hard hat rule; ANSI/ISEA Z89.1 types and classes; inspection |
+| missing gloves | `hand_protection_gloves_osha_1910_138.md` | OSHA-1910.138 | hand protection; selection; ANSI/ISEA 105 cut levels |
+| missing goggles | `eye_face_protection_goggles_osha_1910_133.md` | OSHA-1910.133 | eye/face protection; welding shades; ANSI/ISEA Z87.1 |
+| missing vest | `high_visibility_vest_ansi_isea_107.md` | ANSI-ISEA-107 | via the 1910.132(d) hazard assessment and 1926.201; ANSI/ISEA 107-2020 types/classes |
+| mask | `respiratory_protection_mask_osha_1910_134.md` | OSHA-1910.134 | respirator program, fit testing |
+| fire | `fire_detected_emergency_osha_1910_38_165.md` | OSHA-1910.38 | emergency action plan, alarms (1910.165), evacuation |
+| smoke | `smoke_detected_response.md` | OSHA-1910.38-SMOKE | verify and report; smouldering after hot work; incipient-stage extinguisher use |
+| fire prevention | `fire_prevention_extinguishers_osha_1910_39_157.md` | OSHA-1910.39 | fire prevention plan; extinguisher distances, inspection, training |
+| hot work | `hot_work_welding_fire_osha_1910_252.md` | OSHA-1910.252 | permits, 35 ft rule, 30 min fire watch |
+| what to do on site | `site_ppe_violation_response.md` | SITE-PPE-RESPONSE | **template** site procedure: stop and correct, repeats, records |
+| restricted area | `sop_restricted.md` | SOP-ZONE-02 | sample site procedure (no standard added yet) |
+
+- The ANSI/ISEA and NFPA standards are copyrighted: the files give only facts (editions, types, classes), not their text.
+- Check that the right sections come back for an incident type: `curl -s "localhost:8004/search?q=missing+helmet"`.
+- Adding a file: `source:` header, short `#` sections, and use the words the query uses (`missing helmet`,
+  `fire`, `smoke`, ...): retrieval is keyword based. Rule-id letters such as the `R` in `R-VEST` are ignored.
+
 ## You must do
-- **Replace `knowledge_base/*.md` (SAMPLE content) with your real SOPs/policies.** Format: optional `source: ID` header, `#` headings = chunks. Citations are only as good as these documents.
+- **Adapt `site_ppe_violation_response.md` and `sop_restricted.md` to the site and have the safety officer approve
+  them**, and add the site's own emergency action plan / fire prevention plan sections. The OSHA files are US federal
+  rules; for another country, replace them with the local regulations (for example UK HSE, EU directives).
 - Tune `configs/risk.example.yaml` weights/thresholds with your safety officer.
 
 ## Limits
 - Retrieval is lexical BM25 (no network/embeddings needed). `QdrantRetriever` is a placeholder for semantic search once the KB grows.
 - Plain ordered pipeline rather than LangGraph (no branching needed yet). `AnthropicLLM` defaults to `claude-sonnet-5-5` at `effort: low` with server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; needs `anthropic` ≥ 2.6). It was checked offline against stubbed SDK responses only and has not made a live API call yet; refusals, truncation or no text all fall back to the template.
-- Tested: 11 tests (retrieval, scoring, guardrails, fallbacks, caching, bus handling) passing here with a minimal runner; the FastAPI app and `pytest` itself were not run. Also ran M3-format JSONL → analysis end to end.
+- Tested: 12 tests with `pytest` (retrieval on the real knowledge base, scoring, guardrails, fallbacks, caching, bus handling). Also ran a live M1-M4 clip run and replayed its M3 bus against the current knowledge base: all 8 incidents grounded.

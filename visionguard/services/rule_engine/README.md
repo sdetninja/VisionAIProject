@@ -15,6 +15,8 @@ pip install -r requirements.txt && pytest -q
 python examples/make_demo_jsonl.py out/demo.jsonl                       # synthetic M1 output (no camera/model needed)
 python -m rule_engine --config configs/rules.example.yaml --input out/demo.jsonl --output out/events.jsonl
 # with real M1 output:  --input ../vision_pipeline/out/results/CAM_001.jsonl --follow
+# live, with the combined M0 model: M1 writes ../vision_pipeline/out/results/CAM_001.jsonl, M2 follows it
+python -m rule_engine --config configs/rules.combined.yaml --input ../vision_pipeline/out/results/CAM_001.jsonl --output out/events.jsonl --follow
 CONFIG_PATH=configs/rules.example.yaml uvicorn rule_engine.app:app --port 8002     # optional HTTP service
 ```
 In-process with M1: `pipeline.add_sink(RuleEngineSink(engine, on_event=incident_service.ingest))`.
@@ -25,7 +27,8 @@ In-process with M1: `pipeline.add_sink(RuleEngineSink(engine, on_event=incident_
 3. **Observation** per person per frame:
    - `PRESENT`: item detected on the person.
    - `ABSENT`: explicit `no_<item>` detected, **or** (only for items with `inferred_absence: true`, default helmet/vest) the person is reliably visible and nothing was detected. Inferred evidence is capped at 0.65 confidence.
-   - `UNKNOWN`: person too small, too young a track, low confidence, head cut off by the frame edge, or gloves/goggles/mask with no detection. Unknown observations are ignored: they neither confirm nor clear.
+   - `UNKNOWN`: person too small, too young a track, low confidence, head cut off by the top frame edge (helmet/goggles/mask),
+     torso cut off by the bottom frame edge (vest: a head-and-shoulders box gives no torso to check), or gloves/goggles/mask with no detection. Unknown observations are ignored: they neither confirm nor clear.
    - Both present and `no_` detected: `on_conflict` (default unknown).
 4. **State machine** per (camera, track, zone, rule): confirm when ≥ N of the last M usable observations are violating; **one event per episode**; the episode closes after `clear_frames` consecutive compliant observations (or when the person leaves the zone); `cooldown_s` blocks quick re-reports; a spatial de-dup (IoU ≥ 0.3, same camera/zone/rule, within cooldown) stops a **tracker ID switch** from raising a second incident for the same person.
 5. **Review flag**: `needs_review: true` when mean confidence < `review_below` or most evidence was inferred. This feeds the human-in-the-loop queue.
@@ -40,6 +43,8 @@ In-process with M1: `pipeline.add_sink(RuleEngineSink(engine, on_event=incident_
  "first_seen_at":"2026-10-31T10:30:06.000Z","timestamp":"2026-10-31T10:30:06.700Z","model_version":"ppe-yolo-v0","config_version":1}
 ```
 Event types: `PPE_VIOLATION`, `RESTRICTED_AREA_ENTRY`, `HAZARD_DETECTED` (`track_id` null). `evidence_frames` are M1 frame ids: M3 fetches the JPEGs from the frame buffer by `(camera_id, frame_id)`. `event_id` is deterministic, so M3 can de-duplicate on redelivery. One event is emitted per rule; M3 should group events sharing a `track_id`/`zone` within a few seconds into a single incident (e.g. helmet + gloves).
+
+Manual end-to-end tests with M1 (clip, webcam, dashboard): `visionguard/MANUAL_TESTING.md`.
 
 ## Tuning notes
 - Thresholds in `rules.example.yaml` are starting points. Tune `confirm`, `ppe_regions`, and confidence limits against Milestone 0 recall/precision and recorded footage; don't tune on the test set.

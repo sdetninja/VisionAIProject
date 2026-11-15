@@ -48,7 +48,9 @@ echo "data/\nruns/" >> .gitignore
 | 9 | forklift | Heavy-machinery risk factor |
 | 10 | truck | |
 
-Fire and smoke are a **separate model** (`sources_hazard.yaml`): different data, different thresholds, and different cost of a miss.
+Fire and smoke were planned as a **separate model** (`sources_hazard.yaml`). The current default is **one combined model**
+(10 classes: person, helmet, no_helmet, vest, gloves, no_gloves, goggles, mask, fire, smoke; see section 6b), with fire/smoke
+getting their own per-class alarm thresholds. The two-model route below still works if a separate hazard model is needed.
 
 The rule engine will use both signals: `no_helmet` (explicit) and "person with no `helmet` over N of M frames" (inferred). Where the two disagree, the incident is marked for human review.
 
@@ -169,6 +171,26 @@ python scripts/07_evaluate_baseline.py --weights runs/hazard-yolo-v0/weights/bes
 dvc add data/raw data/processed data/synthetic
 git add . && git commit -m "Milestone 0: dataset v1 + baseline v0"
 ```
+
+### 6b. Combined PPE + fire/smoke model (current default)
+Result: `../runs/detect/runs/combined-yolo-v2/weights/best.pt`, test mAP50 0.732. Full numbers and weaknesses:
+`reports/combined_model_report.md`.
+```bash
+# 1. Raw data in data/raw/{construction_ppe,sh17,hf_ppe,d_fire} (D-Fire: Kaggle/OneDrive pre-split copy, data/{train,val,test})
+python scripts/08_build_combined.py --config configs/sources_combined.yaml --dry-run   # counts only
+python scripts/08_build_combined.py --config configs/sources_combined.yaml             # ~11 min: teachers pseudo-label person/vest/gloves
+# 2. Train. Use --epochs (not --time) on a laptop: --time counts sleep, so a closed lid silently ends the run early.
+python scripts/06_train_baseline.py --data data/processed/combined/data.yaml --name combined-yolo-v1 --model yolo11n.pt --epochs 27 --close-mosaic 5 --workers 8
+#    (v2 = v1 best.pt + 18 epochs: --model ../runs/detect/runs/combined-yolo-v1/weights/best.pt --epochs 18)
+# 3. Alarm thresholds for fire/smoke: chosen on val, reported on test -> reports/hazard_thresholds_<run>.md
+python scripts/09_tune_hazard_thresholds.py --weights ../runs/detect/runs/combined-yolo-v2/weights/best.pt --data data/processed/combined/data.yaml --device mps
+```
+Copy the printed `class_conf` into `visionguard/services/rule_engine/configs/rules.combined.yaml` (R-HAZARD) and
+`visionguard/services/vision_pipeline/configs/pipeline.combined*.yaml` (model).
+Lessons from the first run: keep a laptop plugged in with the lid open (`caffeinate` cannot stop a lid-close sleep on battery);
+on Apple GPUs Ultralytics loads data on the main thread (`0 dataloader workers`), so ~8.5 min/epoch for 8k images.
+The project lives in an iCloud-synced Desktop: iCloud has created `"name 2.jpg"` conflict copies inside `data/processed`
+(each split must have as many images as labels) - moving the project out of iCloud is recommended.
 
 Compute notes for a Mac: use `yolo11n.pt` (or `yolo11s.pt`), `imgsz 640`, batch 8-16. `device=mps` is picked automatically. If training is slow or hits MPS issues, set `PYTORCH_ENABLE_MPS_FALLBACK=1` or use `--device cpu` for the smoke test and Colab for the full run. Small objects (gloves, goggles) often need `imgsz 960` or more; compare in a second run.
 

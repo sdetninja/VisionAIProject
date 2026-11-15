@@ -25,6 +25,7 @@ DEFAULT_REGIONS = {
 # Absence can only be INFERRED (no explicit "no_x" detection) for items that are large and reliably detectable.
 DEFAULT_INFERRED_ABSENCE = {"helmet": True, "vest": True, "gloves": False, "goggles": False, "mask": False}
 TOP_EDGE_ITEMS = {"helmet", "goggles", "mask"}   # need the top of the person box to be inside the frame
+BOTTOM_EDGE_ITEMS = {"vest"}                     # need the torso: person box must not be cut by the frame bottom
 
 
 class ConfigError(ValueError):

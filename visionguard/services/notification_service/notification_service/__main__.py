@@ -1,6 +1,6 @@
 """python -m notification_service --config configs/notify.example.yaml --bus FILE [--bus FILE ...] [--follow]
 Reads M3 (incident.*) and M4 (incident.analyzed) JSONL bus files."""
-import argparse, json, logging, time
+import argparse, json, logging, os, time
 from .config import Config
 from .factory import build
 
@@ -22,6 +22,12 @@ def main():
             serve_metrics(a.metrics_port)
         except ImportError:
             logging.warning("--metrics-port ignored: vg_obs (ops package) not installed")
+    if a.follow:                                               # bus files appear when M3 / M4 publish their first message
+        for p in a.bus:
+            if not os.path.exists(p):
+                logging.info("waiting for %s to appear (it is created by the upstream service)", p)
+            while not os.path.exists(p):
+                time.sleep(1)
     files = [open(p) for p in a.bus]
     while True:
         got = False

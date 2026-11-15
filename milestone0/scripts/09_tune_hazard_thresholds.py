@@ -93,8 +93,8 @@ def main():
             rows.append(f"| {t:.2f}{mark} | {vr:.0%} | {vf:.1%} | {tr:.0%} | {tf:.1%} | "
                         f"{p_confirm(tr, n, m):.0%} | {p_confirm(tf, n, m):.2%} |")
         rows.append("")
-    snippet = {"rule_engine (R-FLOOR-HAZARD)": {"class_conf": chosen},
-               "vision_pipeline (model)": {"class_conf": chosen}}
+    snippet = {"rule_engine (R-FLOOR-HAZARD)": {"class_conf": dict(chosen)},
+               "vision_pipeline (model)": {"class_conf": dict(chosen)}}
     rows += ["## Config", "", "```yaml", yaml.safe_dump(snippet, sort_keys=False).strip(), "```", ""]
     text = "\n".join(rows)
     print(text)

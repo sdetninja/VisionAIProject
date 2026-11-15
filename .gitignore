@@ -11,3 +11,7 @@ runs/
 mlruns/
 mlflow.db
 visionguard/services/vision_pipeline/out/
+visionguard/services/vision_pipeline/samples/*.mp4
+visionguard/.dev/
+visionguard/services/*/data/
+visionguard/services/rule_engine/out/

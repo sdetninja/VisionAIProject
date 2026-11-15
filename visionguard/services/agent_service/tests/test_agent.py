@@ -29,9 +29,16 @@ def test_load_chunks_and_retrieval():
     assert len(ch) >= 8 and all(c.source for c in ch)
     r = BM25Retriever(ch)
     top = r.search("missing helmet head protection")[0][0]
-    assert top.source == "SOP-PPE-01" and top.heading == "Head protection"
-    assert r.search("fire detected")[0][0].source == "SOP-FIRE-03"
+    assert top.source == "OSHA-1910.135" and top.heading.startswith("Head protection required")
+    assert r.search("fire detected")[0][0].source == "OSHA-1910.38"
+    assert r.search("smoke detected")[0][0].source == "OSHA-1910.38-SMOKE"
+    assert r.search("missing gloves")[0][0].source in {"OSHA-1910.138", "SITE-PPE-RESPONSE"}
     assert r.search("zzzz qqqq") == []
+
+
+def test_rule_id_letter_does_not_match_text():
+    r = BM25Retriever(load_chunks(KB))
+    assert r.search("R-ZONE") == []      # "zone" is a stop word and the 1-letter "r" is dropped (it matched "Type R")
 
 
 def test_risk_deterministic_and_monotonic():
@@ -72,7 +79,7 @@ def test_end_to_end_template():
     svc = build(KB, bus=bus)
     a = svc.analyze(inc())
     assert a["severity"] == "HIGH" and a["advisory_only"] and a["grounded"] and a["explanation_mode"] == "template"
-    assert a["citations"][0]["source"] == "SOP-PPE-01"
+    assert {"SITE-PPE-RESPONSE", "OSHA-1910.135"} <= {c["source"] for c in a["citations"]}
     assert bus.messages[0][0] == "incident.analyzed.v1"
     assert svc.analyze(inc()) == a and svc.counters["cached"] == 1 and len(bus.messages) == 1
     svc.analyze(inc(updated_at="v2"))

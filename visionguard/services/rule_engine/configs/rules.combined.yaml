@@ -1,0 +1,29 @@
+# Rules for the combined PPE + fire/smoke model (M1 config: ../vision_pipeline/configs/pipeline.combined.yaml).
+# One whole-frame zone, so any webcam position or test clip works. Copy zones from rules.example.yaml for real cameras.
+version: 1
+track_expiry_s: 15
+
+defaults:
+  confirm: {n: 8, m: 10}
+  cooldown_s: 60
+  clear_frames: 15
+  pos_conf: 0.40
+  neg_conf: 0.40
+  min_person_conf: 0.50
+  min_person_height_frac: 0.15
+  review_below: 0.70
+
+zones:
+  - zone_id: FLOOR_ALL
+    camera_id: "*"
+    rules:
+      - {id: R-HELMET, type: PPE_REQUIRED, item: helmet, description: "Helmet mandatory"}
+      - {id: R-VEST, type: PPE_REQUIRED, item: vest, description: "High-visibility vest mandatory"}
+      # Fires only on explicit no_gloves, so precision matters: v2 val precision 84% at 0.40, 89% at 0.50 (recall 51% -> 46%).
+      - {id: R-GLOVES, type: PPE_REQUIRED, item: gloves, inferred_absence: false, neg_conf: 0.50,
+         description: "Gloves mandatory (only violated on explicit no_gloves detections)"}
+      # Per-class thresholds chosen on val by milestone0/scripts/09_tune_hazard_thresholds.py for combined-yolo-v2
+      # (test: fire 83% / smoke 68% of frames, 96% / 81% with 3-of-5; false alarms 0.4% / 1.7% of frames). Re-run per model.
+      # Low per-frame thresholds are safe only with the 3-of-5 confirmation; events below review_below need human review.
+      - {id: R-HAZARD, type: HAZARD, hazard_classes: [fire, smoke], confirm: {n: 3, m: 5},
+         pos_conf: 0.55, class_conf: {fire: 0.35, smoke: 0.35}, cooldown_s: 300, description: "Fire or smoke detected"}

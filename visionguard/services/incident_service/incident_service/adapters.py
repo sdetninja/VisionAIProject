@@ -14,6 +14,13 @@ class IncidentEventSink:
 
 
 def read_events_jsonl(path: str, follow=False, poll=0.5) -> Iterator[dict]:
+    """With follow=True a missing file is waited for, so M3 can be started before M2."""
+    import logging
+    import os
+    if follow and not os.path.exists(path):
+        logging.getLogger("incident_service").info("waiting for %s to appear (it is created by the upstream service)", path)
+        while not os.path.exists(path):
+            time.sleep(poll)
     with open(path) as f:
         while True:
             line = f.readline()

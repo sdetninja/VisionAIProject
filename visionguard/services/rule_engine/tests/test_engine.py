@@ -84,6 +84,15 @@ def test_head_cut_off_by_frame_edge_is_unknown():
     assert run(eng, seq(40, p={"bottom": 360, "h": 360})) == []       # top y == 0 -> head not visible
 
 
+def test_vest_absence_not_inferred_when_person_cut_off_at_frame_bottom():
+    vest = "      - {id: R-V, type: PPE_REQUIRED, item: vest, cooldown_s: 3, clear_frames: 5}"
+    assert run(RuleEngine(cfg(vest)), seq(40, p={"bottom": 720, "h": 400})) == []        # box ends at frame bottom
+    evs = run(RuleEngine(cfg(vest)), seq(40, p={"bottom": 600, "h": 400}))                 # whole person visible
+    assert len(evs) == 1 and evs[0][1]["evidence_basis"]["inferred"] == 8
+    evs = run(RuleEngine(cfg(vest)), seq(40, p={"bottom": 720, "h": 400}, ppe=lambda p: [vest_box(p, "no_vest", 0.8)]))
+    assert len(evs) == 1 and evs[0][1]["evidence_basis"]["explicit"] == 8                   # explicit evidence still counts
+
+
 def test_small_distant_person_ignored():
     eng = RuleEngine(cfg(HELMET))
     assert run(eng, seq(40, p={"bottom": 200, "h": 60, "w": 30})) == []   # 60px < 15% of 720

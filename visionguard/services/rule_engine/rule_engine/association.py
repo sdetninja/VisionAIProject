@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
-from .config import EngineConfig, Rule, TOP_EDGE_ITEMS
+from .config import BOTTOM_EDGE_ITEMS, EngineConfig, Rule, TOP_EDGE_ITEMS
 from .geometry import area, center, point_in_box, region_box
 from .models import Det, FrameInput, TrackObj
 
@@ -66,6 +66,10 @@ def person_visibility(p: TrackObj, rule: Rule, frame: FrameInput):
         return False, "person_too_small"
     if rule.item in TOP_EDGE_ITEMS and p.bbox[1] <= rule.edge_margin_px:
         return False, "head_cut_off_by_frame_edge"
+    # A box ending at the frame bottom is a truncated person (e.g. head-and-shoulders close-up): the vest region is
+    # computed on the truncated box and may hold no torso at all, so a missing vest cannot be inferred.
+    if rule.item in BOTTOM_EDGE_ITEMS and frame.height and p.bbox[3] >= frame.height - rule.edge_margin_px:
+        return False, "torso_cut_off_by_frame_edge"
     return True, ""
 
 

@@ -1,5 +1,5 @@
 """python -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base [--follow]"""
-import argparse, json, logging, time
+import argparse, json, logging, os, time
 from .bus import JsonlPublisher
 from .factory import build
 
@@ -25,6 +25,10 @@ def main():
             serve_metrics(a.metrics_port)
         except ImportError:
             logging.warning("--metrics-port ignored: vg_obs (ops package) not installed")
+    if a.follow and not os.path.exists(a.bus):                  # M3 creates the bus file on its first event
+        logging.info("waiting for %s to appear (it is created by the upstream service)", a.bus)
+        while not os.path.exists(a.bus):
+            time.sleep(0.5)
     with open(a.bus) as f:
         while True:
             line = f.readline()
