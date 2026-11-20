@@ -1,6 +1,6 @@
 """Minimal, dependency-free Prometheus metrics (text exposition format 0.0.4).
 
-Why not prometheus_client? The workers/APIs of M2-M5 should not need extra deps just to be scraped, and this keeps the
+Why not prometheus_client? The workers/APIs of M2-M4 should not need extra deps just to be scraped, and this keeps the
 exposition format unit-testable. M1 keeps its own prometheus_client metrics; both are scraped as separate targets.
 Safety properties: thread-safe, label-cardinality cap per metric (a runaway label can't exhaust memory), a failing
 collector never breaks a scrape."""

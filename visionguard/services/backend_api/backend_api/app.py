@@ -28,8 +28,7 @@ def create_app(settings=None, verifier=None, gateway=None):
         verifier = HS256Verifier(secret, s.audience, s.issuer)
     if gateway is None:
         os.makedirs(os.path.dirname(s.audit_db) or ".", exist_ok=True)
-        gateway = Gateway(HttpUpstream(s.vision_url), HttpUpstream(s.incident_url), HttpUpstream(s.agent_url),
-                          HttpUpstream(s.notify_url), AuditLog(s.audit_db))
+        gateway = Gateway(HttpUpstream(s.vision_url), HttpUpstream(s.incident_url), AuditLog(s.audit_db))
     limiter = RateLimiter(s.rate_limit_per_min)
 
     app = FastAPI(title="VisionGuard API", docs_url=None, redoc_url=None)   # docs off by default in prod
@@ -79,8 +78,9 @@ def create_app(settings=None, verifier=None, gateway=None):
 
     @app.get("/api/incidents")
     def incidents(status: Optional[str] = None, camera_id: Optional[str] = None, zone: Optional[str] = None,
-                  needs_review: Optional[bool] = None, limit: int = 50, offset: int = 0, p=Depends(user)):
-        return gateway.list_incidents(p, status, camera_id, zone, needs_review, limit, offset)
+                  needs_review: Optional[bool] = None, limit: int = 50, offset: int = 0,
+                  judge_verdict: Optional[str] = None, sort: str = "newest", p=Depends(user)):
+        return gateway.list_incidents(p, status, camera_id, zone, needs_review, limit, offset, judge_verdict, sort)
 
     @app.get("/api/incidents/{iid}")
     def incident(iid: str, p=Depends(user)): return gateway.get_incident(p, iid)
@@ -94,12 +94,6 @@ def create_app(settings=None, verifier=None, gateway=None):
 
     @app.get("/api/labels")
     def labels(p=Depends(user)): return gateway.labels(p)
-
-    @app.get("/api/notifications")
-    def notifications(status: Optional[str] = None, limit: int = 100, p=Depends(user)): return gateway.notifications(p, status, limit)
-
-    @app.post("/api/notifications/requeue-dead")
-    def requeue(p=Depends(user)): return gateway.requeue_notifications(p)
 
     @app.get("/api/audit")
     def audit(limit: int = 100, actor: Optional[str] = None, p=Depends(user)): return gateway.audit_log(p, limit, actor)

@@ -5,7 +5,7 @@ permissions: {contents: read}
 jobs:
   python:
     runs-on: ubuntu-latest
-    strategy: {matrix: {svc: [rule_engine, incident_service, agent_service, notification_service, backend_api, vision_pipeline]}}
+    strategy: {matrix: {svc: [rule_engine, incident_service, agent_service, backend_api, vision_pipeline]}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

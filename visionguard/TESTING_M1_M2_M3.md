@@ -1,4 +1,4 @@
-# Testing Module 1 + Module 2 + Module 3 (+ Module 4) together
+# Testing Module 1 + Module 2 + Module 3 (+ the assessment service) together
 
 Steps 0-6 test M1-M3; step 7 adds M4 (AI risk assessment).
 
@@ -113,81 +113,68 @@ In the full system the reviewer comes from the login token (M6), not from the re
 - **Idempotency** (a re-delivered event never creates a second incident): stop terminal 2 (Ctrl+C) and start it
   again with the same command. It re-reads every event from the start, and the incident count stays at 8 (the M3 log
   summary shows them as duplicates).
-- **Bus output for M4/M5**: `wc -l $VG/services/incident_service/data/bus/events.jsonl` - one message per incident
+- **Bus output for the assessment service**: `wc -l $VG/services/incident_service/data/bus/events.jsonl` - one message per incident
   created or updated (12 for the clip, before reviews).
 - **Evidence needs M1**: stop M1 before M3 has processed an event and that incident gets `evidence_status: missing`
   (frames live only 30 s in M1's memory).
 
-## 7. Add Module 4 (AI risk assessment)
+## 7. Add Module 4: the assessment service (judge + risk + explanation)
 ```
-M3 ingester ──incident.created/updated──► data/bus/events.jsonl ──► M4 worker ──► data/analyses.jsonl (for M5)
-                                                                        │             + data/agent.db
-                                                                        └── risk.py (rules decide severity)
-                                                                            kb.py   (finds the matching SOP section)
-                                                                            template or Claude (writes the text)
-                                                                    M4 API (port 8004): read analyses, search the SOPs
+M3 ingester ──incident.created/updated──► data/bus/events.jsonl ──► assessment service (one process, port 8004)
+                                                                      1. fetch the incident + unannotated frames from M3 (8003)
+                                                                      2. judge: PPE → 3 vision transformers; fire/smoke → + 2 Claude models
+                                                                      3. risk.py (rules decide severity)  4. SOP search + template text
+                                                                      5. POST /incidents/{id}/assessment ──► M3 incidents.db
 ```
-M4 reads the bus that M3 writes, so it needs no change to the steps above. Start it **before M1** (terminals 7 and 8,
-after the `export` line); if you start it later it still reads the bus from the beginning and catches up.
+It reads the bus M3 writes and needs the M3 API (terminal 1) for the images and to store its result. The three
+judges come from Milestone 0 (`milestone0/runs/judge/`, about 280 MB). Start it **before M1** (terminal 7); started
+later it reads the bus from the beginning and catches up.
 
-**Terminal 7 - M4 worker** (waits for M3's bus file):
+**Terminal 7 - assessment service** (worker + API on 8004; the models load in about 3 s):
 ```bash
-cd $VG/services/agent_service && mkdir -p data && $PY -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base --risk-config configs/risk.example.yaml --db data/agent.db --follow
+cd $VG/services/agent_service && $PY -m agent_service --bus ../incident_service/data/bus/events.jsonl --m3-url http://127.0.0.1:8003 --kb knowledge_base --risk-config configs/risk.example.yaml --judge $VG/../milestone0/runs/judge/thresholds.yaml --port 8004 --follow
 ```
-**Terminal 8 - M4 API** (port 8004, same database):
-```bash
-cd $VG/services/agent_service && KB_DIR=knowledge_base RISK_CONFIG=configs/risk.example.yaml AGENT_DB=data/agent.db $PY -m uvicorn agent_service.app:create_app --factory --port 8004
-```
-`dev_stack.sh reset` also moves `agent_service/data` to the backup, so step 1 clears M4 too.
+It keeps no data of its own: everything is in M3, so step 1 clears it too.
 
 **What to check**
-- Terminal 7 prints one line per incident version, e.g. `INC-000001: CRITICAL (85) grounded=True mode=template`.
-  Clip: **12 lines for 8 incidents**. A grouped incident (helmet + vest) is analysed again when its second event
-  arrives, and its score goes up.
-- One analysis in full (severity, how the score was made, summary, actions, SOP citations):
+- Terminal 7 prints one line per incident version: verdict, severity, and why, e.g.
+  `INC-000003: judge CONFIRMED (vit) | HIGH (71) grounded=True | helmet: P(missing) 0.94 -> CONFIRMED`.
+- One incident with its assessment (judge scores per model, risk factors, summary, actions, SOP citations):
   ```bash
-  curl -s http://127.0.0.1:8004/analyses/INC-000001 | $PY -m json.tool
+  curl -s http://127.0.0.1:8003/incidents/INC-000003 | $PY -c "import json,sys;print(json.dumps(json.load(sys.stdin)['assessment'],indent=2))"
   ```
-- All analyses, one line each (the latest per incident is the one that counts):
+- The review queue in priority order (risk first; PPE the judge calls a likely false alarm last; fire never moved down):
   ```bash
-  $PY -c "import json;[print(p['incident_id'],p['severity'],p['risk_score'],p['explanation_mode'],'|',p['summary']) for p in (json.loads(l)['payload'] for l in open('$VG/services/agent_service/data/analyses.jsonl'))]"
+  curl -s "http://127.0.0.1:8003/incidents?sort=priority" | $PY -c "import json,sys;[print(i['incident_id'],i['severity'],i['risk_score'],i['judge_verdict']) for i in json.load(sys.stdin)['items']]"
   ```
-- Search the knowledge base the way M4 does: `curl -s "http://127.0.0.1:8004/search?q=helmet"`
-- An incident that does not exist returns **404**: `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8004/analyses/INC-999999`
+- Re-judge one incident now: `curl -s -X POST "http://127.0.0.1:8004/assess/INC-000005?force=true"`
+- Search the knowledge base the way the service does: `curl -s "http://127.0.0.1:8004/search?q=helmet"`
 
-**Expected with the clip** (live M1-M4 run checked 2026-11-15; scores can move a few points with
-the order of events, because of the repeat bonus):
+**Expected with the clip** (live run checked 2026-11-16; scores can move a few points with the order of events):
 
-| Incident | Severity (score) | Why |
+| Incident | Judge | Severity (score) |
 |---|---|---|
-| INC-000001 fire | CRITICAL (85) | base 70, fire +30, × 0.85 because it needs review |
-| INC-000002 smoke | HIGH (79) | |
-| INC-000003 helmet | HIGH (55) | explicit, no review: no 0.85 discount |
-| INC-000004..7 helmet + vest | HIGH (63-71, then 76) | helmet +25, vest +10, **repeat bonus**: up to +24 for similar incidents on the same camera and zone in 24 h |
-| INC-000008 vest | MEDIUM (54) | |
-
-All are `grounded=True` (a matching SOP section was found) and `advisory_only: true`. With no SOP match the analysis
-says `grounded: false` and asks for a human instead of inventing a policy.
+| INC-000001 fire | UNSURE (ViT 0.99; no LLM panel without an API key) | CRITICAL (85) |
+| INC-000002 smoke | UNSURE (ViT 0.95; same) | HIGH (79) |
+| INC-000003 helmet | CONFIRMED (0.94) | HIGH (71) |
+| INC-000004..7 helmet + vest | CONFIRMED (helmet 0.66-0.98; vest 0.63-0.97) | HIGH (69-76) |
+| INC-000008 vest | UNSURE (0.50: the vest check is the weakest) | MEDIUM (54) |
 
 **Points to make**
-- **Severity is never decided by the AI.** `configs/risk.example.yaml` weights and thresholds decide it (see
-  `risk_factors`); the text writer only explains it, and an answer that contradicts the severity is rejected.
-- **Grounded in standards**: recommended actions cite `knowledge_base/*.md` sections: OSHA PPE and fire rules, the
-  ANSI/ISEA 107 vest standard and a site response template (list in `services/agent_service/README.md`). With the clip,
-  helmet incidents cite SITE-PPE-RESPONSE and OSHA-1910.135, vest incidents ANSI-ISEA-107, fire OSHA-1910.38, smoke
-  OSHA-1910.38-SMOKE.
-- **Idempotent**: restart terminal 7; it re-reads the bus and its summary says `'analyzed': 0, 'cached': 12`.
-- `/health` on 8004 counts only the API process's own work, so it shows 0 while the worker does the analysing.
+- **Two opinions, people decide.** The rule engine makes a claim; the judge (three different vision transformers,
+  averaged) checks it on a clean crop. Nothing is closed or hidden: "likely false" only moves a PPE incident down.
+- **Fire/smoke gets an LLM panel**: Claude Opus 5.5 on the crop and Claude Sonnet 5.5 on the full frame, both must agree.
+  PPE images never leave the machine.
+- **Severity is never decided by the AI.** `configs/risk.example.yaml` decides it (see `risk_factors`).
+- **Grounded in standards**: actions cite `knowledge_base/*.md` (OSHA, ANSI/ISEA 107, a site template).
+- **Idempotent**: restart terminal 7; it re-reads the bus and judges nothing again (M3 already has each version).
 
-**Optional: let Claude write the text.** By default the text comes from a template (`mode=template`). For Claude,
-install the SDK once (`$PY -m pip install "anthropic>=2.6"`, not installed yet), `export ANTHROPIC_API_KEY=...` in
-terminals 7 and 8, and add `--llm anthropic` to terminal 7 and `LLM_KIND=anthropic` to terminal 8. `mode=llm` means
-Claude wrote it; `template_fallback` means the call failed or a guardrail rejected the answer (reason in
-`guardrail_problems`). The severity and score stay the same. Clear `agent_service/data` first, or the cached template
-answers are reused.
+**Optional: switch on the LLM panel and Claude-written text.** Install the SDK once (`$PY -m pip install "anthropic>=2.6"`),
+`export ANTHROPIC_API_KEY=...` in terminal 7, and add `--panel anthropic` (fire/smoke judges) and/or `--llm anthropic`
+(explanations). Each fire/smoke incident then costs about $0.06 and sends its frames to the Anthropic API.
 
 ## 8. Stop
-Ctrl+C in terminals 1-4 (and 5-8). Next run: step 1 (`dev_stack.sh reset`) again.
+Ctrl+C in terminals 1-4 (and 5-7). Next run: step 1 (`dev_stack.sh reset`) again.
 
 ## Troubleshooting
 | Symptom | Fix |

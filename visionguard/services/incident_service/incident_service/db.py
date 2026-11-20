@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS incidents (
   event_count INTEGER NOT NULL DEFAULT 1,
   evidence_uris TEXT NOT NULL DEFAULT '[]', thumbnail_uri TEXT, evidence_status TEXT NOT NULL DEFAULT 'none',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  reviewed_by TEXT, review_comment TEXT);
+  reviewed_by TEXT, review_comment TEXT,
+  raw_evidence TEXT NOT NULL DEFAULT '[]',
+  judge_verdict TEXT, severity TEXT, risk_score INTEGER, assessed_version TEXT);
 CREATE INDEX IF NOT EXISTS ix_inc_group ON incidents(camera_id, zone, track_id, hazard_class, event_type, status);
 CREATE INDEX IF NOT EXISTS ix_inc_status ON incidents(status, created_at);
 CREATE TABLE IF NOT EXISTS events (
@@ -38,9 +40,31 @@ CREATE INDEX IF NOT EXISTS ix_outbox_pending ON outbox(published_at, dead, id);
 CREATE TABLE IF NOT EXISTS labels (
   id INTEGER PRIMARY KEY AUTOINCREMENT, incident_id TEXT NOT NULL, event_id TEXT NOT NULL, rule_id TEXT,
   label TEXT NOT NULL, reviewer TEXT, created_at TEXT NOT NULL, evidence_uris TEXT NOT NULL, event_payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_id TEXT NOT NULL, incident_version TEXT NOT NULL, created_at TEXT NOT NULL,
+  verdict TEXT NOT NULL, judge_mode TEXT NOT NULL, judge_reason TEXT, vit TEXT, llm TEXT,
+  severity TEXT, risk_score INTEGER, risk_factors TEXT,
+  summary TEXT, recommended_actions TEXT, citations TEXT, grounded INTEGER, explanation_mode TEXT,
+  model_versions TEXT,
+  UNIQUE(incident_id, incident_version));
 """
+# Columns added after the first release: ALTER TABLE for databases created by an older version.
+_MIGRATIONS = {"incidents": [("raw_evidence", "TEXT NOT NULL DEFAULT '[]'"), ("judge_verdict", "TEXT"), ("severity", "TEXT"),
+                             ("risk_score", "INTEGER"), ("assessed_version", "TEXT")]}
+_A_JSON = ("vit", "llm", "risk_factors", "recommended_actions", "citations", "model_versions")
+_A_COLS = ("incident_id", "incident_version", "verdict", "judge_mode", "judge_reason", "severity", "risk_score", "summary",
+           "explanation_mode") + _A_JSON
 
-_JSON_COLS = ("missing_ppe", "rule_ids", "evidence_uris")
+_JSON_COLS = ("missing_ppe", "rule_ids", "evidence_uris", "raw_evidence")
+
+
+# Review queue order. "priority": highest risk first; PPE incidents the judge thinks are false alarms go to the bottom.
+# Fire/smoke is never moved down, whatever the judge says (ARCHITECTURE_V3_ASSESSMENT.md, decision 6).
+_ORDER = {
+    "newest": "id DESC",
+    "priority": "(COALESCE(judge_verdict,'')='LIKELY_FALSE' AND event_type!='HAZARD_DETECTED') ASC, COALESCE(risk_score,-1) DESC, id DESC",
+}
 
 
 def now_iso() -> str:
@@ -86,6 +110,11 @@ class SqliteRepository:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        for table, cols in _MIGRATIONS.items():        # before SCHEMA: its indexes may use the new columns
+            have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if have and name not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
         self._conn.executescript(SCHEMA)
         self._lock = threading.RLock()
 
@@ -137,11 +166,12 @@ class SqliteRepository:
         cur = self._q(
             "INSERT INTO incidents(event_type,camera_id,zone,track_id,hazard_class,missing_ppe,rule_ids,status,"
             "needs_review,confidence,first_event_time,last_event_time,last_event_ts,event_count,evidence_uris,"
-            "thumbnail_uri,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "thumbnail_uri,evidence_status,created_at,updated_at,raw_evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (d["event_type"], d["camera_id"], d["zone"], d.get("track_id"), d.get("hazard_class"),
              json.dumps(d["missing_ppe"]), json.dumps(d["rule_ids"]), d["status"], int(d["needs_review"]),
              d["confidence"], d["first_event_time"], d["last_event_time"], d["last_event_ts"], 1,
-             json.dumps(d["evidence_uris"]), d.get("thumbnail_uri"), d["evidence_status"], now, now))
+             json.dumps(d["evidence_uris"]), d.get("thumbnail_uri"), d["evidence_status"], now, now,
+             json.dumps(d.get("raw_evidence") or [])))
         iid = f"INC-{cur.lastrowid:06d}"
         self._q("UPDATE incidents SET incident_id=? WHERE id=?", (iid, cur.lastrowid))
         return iid
@@ -160,10 +190,10 @@ class SqliteRepository:
         r = self._q("SELECT * FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
         return _inc(r) if r else None
 
-    def list_incidents(self, *, status=None, camera_id=None, zone=None, needs_review=None,
-                       limit=50, offset=0) -> tuple:
+    def list_incidents(self, *, status=None, camera_id=None, zone=None, needs_review=None, judge_verdict=None,
+                       sort="newest", limit=50, offset=0) -> tuple:
         w, a = [], []
-        for col, v in (("status", status), ("camera_id", camera_id), ("zone", zone)):
+        for col, v in (("status", status), ("camera_id", camera_id), ("zone", zone), ("judge_verdict", judge_verdict)):
             if v:
                 w.append(f"{col}=?")
                 a.append(v)
@@ -172,8 +202,40 @@ class SqliteRepository:
             a.append(int(needs_review))
         where = ("WHERE " + " AND ".join(w)) if w else ""
         total = self._q(f"SELECT COUNT(*) c FROM incidents {where}", a).fetchone()["c"]
-        rows = self._q(f"SELECT * FROM incidents {where} ORDER BY id DESC LIMIT ? OFFSET ?", (*a, limit, offset))
+        rows = self._q(f"SELECT * FROM incidents {where} ORDER BY {_ORDER[sort]} LIMIT ? OFFSET ?", (*a, limit, offset))
         return [_inc(r) for r in rows], total
+
+    # ---- assessments (written by the assessment service through the API) --------------------------
+    def add_assessment(self, a: dict) -> bool:
+        """Insert one assessment per (incident, version); a repeat for the same version replaces it. Copies verdict,
+        severity and score onto the incident unless a newer version was already assessed. Returns True if copied."""
+        row = {c: (json.dumps(a.get(c)) if c in _A_JSON else a.get(c)) for c in _A_COLS}
+        row["grounded"] = None if a.get("grounded") is None else int(bool(a["grounded"]))
+        row["created_at"] = now_iso()
+        with self.transaction():
+            self._q(f"INSERT OR REPLACE INTO assessments({','.join(row)}) VALUES({','.join('?' * len(row))})",
+                    tuple(row.values()))
+            # NOT update_incident(): that bumps updated_at, which is the version being assessed.
+            return self._q("UPDATE incidents SET judge_verdict=?, severity=?, risk_score=?, assessed_version=? "
+                           "WHERE incident_id=? AND (assessed_version IS NULL OR assessed_version<=?)",
+                           (a["verdict"], a.get("severity"), a.get("risk_score"), a["incident_version"],
+                            a["incident_id"], a["incident_version"])).rowcount > 0
+
+    def latest_assessment(self, incident_id: str) -> Optional[dict]:
+        r = self._q("SELECT * FROM assessments WHERE incident_id=? ORDER BY incident_version DESC, id DESC LIMIT 1",
+                    (incident_id,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d.pop("id")
+        for c in _A_JSON:
+            d[c] = json.loads(d[c]) if d[c] is not None else None
+        d["grounded"] = None if d["grounded"] is None else bool(d["grounded"])
+        return d
+
+    def assessment_counts(self) -> dict:
+        return {r["verdict"]: r["n"] for r in self._q(
+            "SELECT judge_verdict verdict, COUNT(*) n FROM incidents WHERE judge_verdict IS NOT NULL GROUP BY judge_verdict")}
 
     # ---- history / labels ---------------------------------------------------------------------
     def add_history(self, incident_id, actor, from_status, to_status, comment=None):

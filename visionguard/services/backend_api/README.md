@@ -1,9 +1,9 @@
 # M6 – Backend API (gateway)
 
-The **only** service the dashboard talks to. Internal services (M1, M3, M4, M5) have no auth and must not be exposed.
+The **only** service the dashboard talks to. Internal services (M1, M3, the assessment service) have no auth and must not be exposed.
 
 ```
-Dashboard ─HTTPS+JWT─► backend_api ─► M1 cameras · M3 incidents/review/evidence · M4 analyses · M5 notifications
+Dashboard ─HTTPS+JWT─► backend_api ─► M1 cameras · M3 incidents/review/evidence/assessments
                          authn → RBAC → camera scope → audit → rate limit
 ```
 
@@ -11,15 +11,15 @@ Dashboard ─HTTPS+JWT─► backend_api ─► M1 cameras · M3 incidents/revie
 | Concern | How |
 |---|---|
 | Authn | Bearer JWT. `HS256Verifier` (dev, secret ≥32 chars in `VG_JWT_SECRET`) or `OidcVerifier` (RS256 via your IdP JWKS; needs `pyjwt[crypto]`). Checks sig, exp, nbf, aud, iss; `alg` is never taken from the token (blocks `alg=none`). |
-| RBAC | `viewer` read; `reviewer` + review/notifications read; `admin` + labels, audit, requeue, live stream. Edit `rbac.py`. |
+| RBAC | `viewer` read (incidents + judge assessments); `reviewer` + review; `admin` + labels, audit, live stream. Edit `rbac.py`. |
 | Camera scope | Optional `cameras` claim limits a user to listed cameras. Out-of-scope incidents return **404** (no existence leak) for read, evidence and review. |
 | Identity of reviewer | Taken from the token; the request body has no `actor` field. |
-| Data exposure | Raw storage URIs and internal event payloads are stripped; evidence is served via `/api/incidents/{id}/evidence/{n}` after scope check, and each view is audited. |
+| Data exposure | Raw storage URIs, the judge's unannotated frames (`raw_evidence`) and internal event payloads are stripped; evidence is served via `/api/incidents/{id}/evidence/{n}` after scope check, and each view is audited. |
 | Audit | Hash-chained SQLite log of reviews, evidence views, exports, denials. `GET /api/audit` reports `chain_valid`. |
 | Other | Per-user rate limit, no wildcard CORS, `nosniff`/`no-store` headers, API docs disabled, upstream errors masked (502/503). |
 
 ## Endpoints
-`GET /health` · `/api/me` · `/api/cameras` · `/api/cameras/{id}/latest` · `/api/incidents` (filters: status, camera_id, zone, needs_review, limit, offset) · `/api/incidents/{id}` (includes AI analysis; degrades to `{"unavailable": true}`) · `/api/incidents/{id}/evidence/{n}` · `POST /api/incidents/{id}/review {action, comment}` · `/api/labels` (admin) · `/api/notifications` · `POST /api/notifications/requeue-dead` (admin) · `/api/audit` (admin)
+`GET /health` · `/api/me` · `/api/cameras` · `/api/cameras/{id}/latest` · `/api/incidents` (filters: status, camera_id, zone, needs_review, judge_verdict, limit, offset; `sort=newest|priority`) · `/api/incidents/{id}` (includes the `assessment` from M3: judge verdict, risk, explanation; `null` until judged) · `/api/incidents/{id}/evidence/{n}` · `POST /api/incidents/{id}/review {action, comment}` · `/api/labels` (admin) · `/api/audit` (admin)
 
 ## Run
 ```bash
@@ -31,7 +31,7 @@ uvicorn backend_api.app:create_app --factory --port 8000
 | Env var | Default | Purpose |
 |---|---|---|
 | `VG_JWT_SECRET` | – (required) | HS256 signing secret for dev tokens |
-| `VG_VISION_URL` / `VG_INCIDENT_URL` / `VG_AGENT_URL` / `VG_NOTIFY_URL` | `http://localhost:8001` / `8003` / `8004` / `8005` | Internal M1 / M3 / M4 / M5 services |
+| `VG_VISION_URL` / `VG_INCIDENT_URL` | `http://localhost:8001` / `8003` | Internal M1 / M3 services (v3: assessments are read from M3; M5 removed) |
 | `VG_AUDIT_DB` | `data/audit.db` | Hash-chained audit log |
 | `VG_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated; `*` is rejected |
 | `VG_AUDIENCE` / `VG_ISSUER` | `visionguard-api` / `visionguard` | Expected `aud` / `iss` claims |
@@ -63,7 +63,7 @@ curl -s -H "Authorization: Bearer <token>" http://localhost:8000/api/me
 | `invalid choice: 'reviewer.'` | Wrong role name; use `viewer`, `reviewer` or `admin`. |
 | `token expired` | Default lifetime is 8 h; generate a new one (or pass `--hours`). |
 | `KeyError: 'VG_JWT_SECRET'` | The token command needs the secret too; export it or `source` the env file. |
-| `upstream unavailable` (503) | An internal service (M1/M3/M4/M5) is not running at its `VG_*_URL`. |
+| `upstream unavailable` (503) | An internal service (M1/M3) is not running at its `VG_*_URL`. |
 
 The dashboard (M7, `npm run dev`) proxies `/api` to `http://localhost:8000`; set `VG_API` to point it elsewhere.
 

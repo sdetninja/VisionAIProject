@@ -9,6 +9,7 @@ from .errors import ApiError
 from .rbac import camera_allowed, can
 
 REVIEW_ACTIONS = {"start_review", "confirm", "reject", "resolve"}
+SORTS = {"newest", "priority"}       # priority: highest risk first, PPE the judge calls LIKELY_FALSE last (M3 decides)
 MAX_COMMENT = 1000
 
 
@@ -28,8 +29,8 @@ class RateLimiter:
 
 
 class Gateway:
-    def __init__(self, vision, incidents, agent, notify, audit: AuditLog, max_scan_pages=10):
-        self.vision, self.incidents, self.agent, self.notify, self.audit = vision, incidents, agent, notify, audit
+    def __init__(self, vision, incidents, audit: AuditLog, max_scan_pages=10):
+        self.vision, self.incidents, self.audit = vision, incidents, audit
         self.max_scan_pages = max_scan_pages
 
     # ---------- helpers
@@ -45,14 +46,16 @@ class Gateway:
         return inc
 
     @staticmethod
-    def _public(inc, analysis=None):
-        out = {k: v for k, v in inc.items() if k not in ("evidence_uris", "thumbnail_uri", "events")}
+    def _public(inc, with_assessment=False):
+        # raw_evidence: unannotated frames for the judge only (storage URIs, never exposed); events: internal payloads
+        hidden = {"evidence_uris", "thumbnail_uri", "events", "raw_evidence", "assessed_version", "assessment"}
+        out = {k: v for k, v in inc.items() if k not in hidden}
         iid = inc["incident_id"]
         n = len(inc.get("evidence_uris") or [])
         out["evidence"] = [f"/api/incidents/{iid}/evidence/{i}" for i in range(n)]
         out["thumbnail"] = out["evidence"][0] if n else None
-        if analysis is not None:
-            out["analysis"] = analysis
+        if with_assessment:
+            out["assessment"] = inc.get("assessment")
         return out
 
     # ---------- cameras
@@ -70,13 +73,16 @@ class Gateway:
         return self.vision.get(f"/cameras/{camera_id}/latest")
 
     # ---------- incidents
-    def list_incidents(self, p, status=None, camera_id=None, zone=None, needs_review=None, limit=50, offset=0):
+    def list_incidents(self, p, status=None, camera_id=None, zone=None, needs_review=None, limit=50, offset=0,
+                       judge_verdict=None, sort="newest"):
         self._need(p, "incidents:read")
         limit = max(1, min(limit, 200))
         offset = max(0, offset)
+        if sort not in SORTS:
+            raise ApiError(422, "invalid sort")
         if camera_id and not camera_allowed(p, camera_id):
             return {"total": 0, "items": [], "limit": limit, "offset": offset}
-        q = dict(status=status, camera_id=camera_id, zone=zone, needs_review=needs_review)
+        q = dict(status=status, camera_id=camera_id, zone=zone, needs_review=needs_review, judge_verdict=judge_verdict, sort=sort)
         if p.cameras is None:
             d = self.incidents.get("/incidents", limit=limit, offset=offset, **q)
             return {"total": d["total"], "items": [self._public(i) for i in d["items"]], "limit": limit, "offset": offset}
@@ -96,15 +102,9 @@ class Gateway:
         return {"total": None, "items": kept, "limit": limit, "offset": offset}   # total unknown for scoped users
 
     def get_incident(self, p, iid):
+        """The assessment (judge verdict, risk, explanation) comes from M3 with the incident: None until it is judged."""
         self._need(p, "incidents:read")
-        inc = self._inc(p, iid)
-        analysis = None
-        if can(p.role, "analyses:read"):
-            try:
-                analysis = self.agent.get(f"/analyses/{iid}")
-            except ApiError as e:
-                analysis = {"unavailable": True} if e.status in (404, 502, 503) else None
-        return self._public(inc, analysis)
+        return self._public(self._inc(p, iid), with_assessment=can(p.role, "assessments:read"))
 
     def evidence(self, p, iid, idx):
         self._need(p, "incidents:read")
@@ -135,16 +135,6 @@ class Gateway:
         self._need(p, "labels:read")
         self.audit.record(p.sub, p.role, "labels.export")
         return self.incidents.get("/labels")
-
-    def notifications(self, p, status=None, limit=100):
-        self._need(p, "notifications:read")
-        return self.notify.get("/notifications", status=status, limit=min(limit, 500))
-
-    def requeue_notifications(self, p):
-        self._need(p, "notifications:manage")
-        r = self.notify.post("/notifications/requeue-dead")
-        self.audit.record(p.sub, p.role, "notifications.requeue", "", "ok", str(r))
-        return r
 
     def audit_log(self, p, limit=100, actor=None):
         self._need(p, "audit:read")

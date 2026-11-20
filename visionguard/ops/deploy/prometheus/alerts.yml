@@ -37,11 +37,11 @@ groups:
     for: 5m
     labels: {severity: warning}
     annotations: {summary: "Outbox backlog growing"}
-  - alert: NotificationsDead
-    expr: vg_notifications{status="DEAD"} > 0
-    for: 1m
-    labels: {severity: critical}
-    annotations: {summary: "Notifications exhausted retries - nobody was told", impact: "Safety incident may be unseen"}
+  - alert: AssessmentsFailing
+    expr: increase(vg_assessment_events_total{kind="failed"}[15m]) > 0
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "Assessment service failing (incidents shown without judge verdict or risk)", action: "Check the assessment worker log and M3 reachability"}
   - alert: IncidentsUnreviewed
     expr: vg_incident_oldest_open_age_seconds > 1800
     for: 5m
@@ -67,7 +67,7 @@ groups:
     labels: {severity: warning}
     annotations: {summary: ">50% of reviewed incidents were false positives in 24h", action: "Review rule thresholds (M8 feedback --labels)"}
   - alert: LLMFallbackHigh
-    expr: vg_agent_events_total{kind="fallback"} / clamp_min(vg_agent_events_total{kind="analyzed"}, 1) > 0.3
+    expr: vg_assessment_events_total{kind="fallback"} / clamp_min(vg_assessment_events_total{kind="assessed"}, 1) > 0.3
     for: 30m
     labels: {severity: info}
-    annotations: {summary: "Over 30% of analyses fell back to the template (LLM output rejected by guardrails)"}
+    annotations: {summary: "Over 30% of assessments fell back to the template (LLM output rejected by guardrails)"}

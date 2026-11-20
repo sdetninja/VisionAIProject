@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApi, ApiError, isSafeEvidencePath } from "../src/api.js";
 import { decodeClaims, isExpired, makeTokenStore } from "../src/auth.js";
-import { actionsFor, describeIncident, timeAgo, errorMessage } from "../src/format.js";
+import { actionsFor, describeIncident, timeAgo, errorMessage, verdictLabel, verdictNote, pct } from "../src/format.js";
 import { startPolling } from "../src/polling.js";
 
 const jwt = (c) => "h." + Buffer.from(JSON.stringify(c)).toString("base64url") + ".s";
@@ -79,6 +79,22 @@ test("format: describe, timeAgo, errorMessage", () => {
   assert.equal(timeAgo("nope", now), "");
   assert.match(errorMessage({ status: 409 }), /not allowed/);
   assert.match(errorMessage({ status: 403 }), /permission/);
+});
+
+test("format: judge verdicts", () => {
+  assert.equal(verdictLabel(null), "Judge: pending");
+  assert.equal(verdictLabel("LIKELY_FALSE"), "Judge: likely false alarm");
+  assert.equal(verdictNote("CONFIRMED", "PPE_VIOLATION"), "");
+  assert.match(verdictNote("LIKELY_FALSE", "HAZARD_DETECTED"), /full priority/);     // fire/smoke is never down-ranked
+  assert.match(verdictNote("LIKELY_FALSE", "PPE_VIOLATION"), /moved down/);
+  assert.equal(pct(0.456), "46%"); assert.equal(pct(null), "–");
+});
+
+test("api: queue sends sort and judge filter", async () => {
+  let seen;
+  const api = createApi({ getToken: () => "T", fetchImpl: async (u) => { seen = u; return resp(200, {}); } });
+  await api.incidents({ sort: "priority", judge_verdict: "UNSURE", limit: 25, offset: 0 });
+  assert.equal(seen, "/api/incidents?sort=priority&judge_verdict=UNSURE&limit=25&offset=0");
 });
 
 test("polling: runs, backs off on error, resets, stops, pauses when hidden", async () => {

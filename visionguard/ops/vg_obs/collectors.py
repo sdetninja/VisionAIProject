@@ -1,4 +1,4 @@
-"""Domain metrics for M2-M5, computed at scrape time. Prefer DB-derived values: with a worker process and an API
+"""Domain metrics for M2-M4 (v3: M5 removed), computed at scrape time. Prefer DB-derived values: with a worker process and an API
 process sharing one database, only the DB gives a consistent picture (in-memory counters are per-process)."""
 from __future__ import annotations
 
@@ -23,20 +23,25 @@ def register_incident(service, registry=None):
                    lambda: [({"state": k}, v) for k, v in snap()["outbox"].items() if k in ("pending", "dead")], r)
     CallbackMetric("vg_review_labels_total", "Reviewer verdicts recorded (monotonic)", "counter",
                    lambda: [({"label": k}, v) for k, v in snap()["labels"].items()], r)
+    CallbackMetric("vg_incident_judge_verdicts", "Incidents by latest judge verdict (from DB)", "gauge",
+                   lambda: [({"verdict": k}, v) for k, v in service.repo.assessment_counts().items()], r)
 
 
-def register_agent(service, registry=None):
-    # NOTE: kind="fallback" is a SUBSET of kind="analyzed" (LLM output rejected by guardrails -> template used).
-    CallbackMetric("vg_agent_events_total", "Agent counters by kind (fallback is a subset of analyzed)", "counter",
-                   lambda: [({"kind": k}, v) for k, v in _num_items(service.counters).items()], registry or REGISTRY)
+_ASSESS_KINDS = ("assessed", "cached", "skipped", "failed", "fallback")
 
 
-def register_notification(service, registry=None):
+def register_assessment(service, registry=None):
+    """Assessment service (v3, was the M4 agent). kind="fallback" is a SUBSET of kind="assessed" (LLM explanation
+    rejected by guardrails -> template used)."""
     r = registry or REGISTRY
-    CallbackMetric("vg_notify_events_total", "Notification counters by kind (this process)", "counter",
-                   lambda: [({"kind": k}, v) for k, v in _num_items(service.counters).items()], r)
-    CallbackMetric("vg_notifications", "Notification rows by status (from DB; DEAD needs operator action)", "gauge",
-                   lambda: [({"status": k}, v) for k, v in service.store.stats().items()], r)
+    CallbackMetric("vg_assessment_events_total", "Assessment counters by kind (fallback is a subset of assessed)", "counter",
+                   lambda: [({"kind": k}, service.counters.get(k, 0)) for k in _ASSESS_KINDS], r)
+    CallbackMetric("vg_assessment_verdicts_total", "Judge verdicts given by this process", "counter",
+                   lambda: [({"verdict": k}, v) for k, v in service.verdicts.items()], r)
+    CallbackMetric("vg_assessment_judge_seconds_total", "Time spent judging (ViT + LLM panel); divide by assessed", "counter",
+                   lambda: [({}, service.counters.get("judge_seconds", 0.0))], r)
+    CallbackMetric("vg_assessment_llm_cost_usd_total", "Estimated LLM panel cost (fire/smoke only)", "counter",
+                   lambda: [({}, service.counters.get("llm_cost_usd", 0.0))], r)
 
 
 def register_rule_engine(engine, registry=None):

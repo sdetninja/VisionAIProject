@@ -1,39 +1,30 @@
-"""uvicorn agent_service.app:create_app --factory --port 8004   (env: KB_DIR, RISK_CONFIG, LLM_KIND, AGENT_DB). Fronted by M6."""
-import os
-from typing import Optional
+"""Small HTTP API of the assessment service, served by the worker process (`python -m agent_service --port 8004`).
+Internal only: M6 reads assessments from M3, not from here."""
 
 
-def create_app(service=None):
+def create_app(service):
     from fastapi import FastAPI, HTTPException
-    from .factory import build
-    service = service or build(os.environ.get("KB_DIR", "knowledge_base"), os.environ.get("RISK_CONFIG"),
-                               os.environ.get("LLM_KIND", "template"), os.environ.get("AGENT_DB", ":memory:"))
-    app = FastAPI(title="VisionGuard Agent Service")
+    from .m3client import M3Error
+    app = FastAPI(title="VisionGuard Assessment Service")
     try:    # M9: /metrics + request ids + JSON access logs. Optional so the service still runs without the ops package.
         from vg_obs import instrument
-        _reg = instrument(app, "agent")
-        from vg_obs.collectors import register_agent
-        register_agent(service, _reg)
+        _reg = instrument(app, "assessment")
+        from vg_obs.collectors import register_assessment
+        register_assessment(service, _reg)
     except ImportError:
         pass
 
     @app.get("/health")
     def health():
-        return {"status": "ok", **service.counters}
+        return {"status": "ok", **service.counters, "verdicts": service.verdicts, "judge": service.judge.versions()}
 
-    @app.post("/analyze")
-    def analyze(inc: dict, force: bool = False):
+    @app.post("/assess/{iid}")
+    def assess(iid: str, force: bool = False):
+        """Judge one incident now (e.g. after training new judges: force=true re-judges the current version)."""
         try:
-            return service.analyze(inc, force)
-        except (ValueError, KeyError) as e:
-            raise HTTPException(422, f"invalid incident: {e}")
-
-    @app.get("/analyses/{iid}")
-    def get(iid: str):
-        a = service.store.get(iid)
-        if not a:
-            raise HTTPException(404, "no analysis")
-        return a
+            return service.assess(iid, force)
+        except M3Error as e:
+            raise HTTPException(e.status if e.status in (404, 503) else 502, str(e))
 
     @app.get("/search")
     def search(q: str, k: int = 4):

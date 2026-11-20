@@ -24,7 +24,7 @@ class MemoryBus:
 
 
 class JsonlBus:
-    """Append-only file; tail it from M4/M5 during MVP. Replace with Kafka/Redis Streams later."""
+    """Append-only file; the assessment service tails it during MVP. Replace with Kafka/Redis Streams later."""
     def __init__(self, path: str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)

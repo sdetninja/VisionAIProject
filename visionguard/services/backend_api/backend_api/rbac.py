@@ -1,8 +1,8 @@
 PERMISSIONS = {
-    "viewer": {"cameras:read", "incidents:read", "analyses:read"},
-    "reviewer": {"cameras:read", "incidents:read", "analyses:read", "incidents:review", "notifications:read"},
-    "admin": {"cameras:read", "incidents:read", "analyses:read", "incidents:review", "notifications:read",
-              "notifications:manage", "labels:read", "audit:read", "stream:read"},
+    "viewer": {"cameras:read", "incidents:read", "assessments:read"},
+    "reviewer": {"cameras:read", "incidents:read", "assessments:read", "incidents:review"},
+    "admin": {"cameras:read", "incidents:read", "assessments:read", "incidents:review", "labels:read", "audit:read",
+              "stream:read"},
 }
 # stream (live video) is deliberately admin-only until per-camera ACLs + watermarking exist.
 

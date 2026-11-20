@@ -194,6 +194,39 @@ The project lives in an iCloud-synced Desktop: iCloud has created `"name 2.jpg"`
 
 Compute notes for a Mac: use `yolo11n.pt` (or `yolo11s.pt`), `imgsz 640`, batch 8-16. `device=mps` is picked automatically. If training is slow or hits MPS issues, set `PYTORCH_ENABLE_MPS_FALLBACK=1` or use `--device cpu` for the smoke test and Colab for the full run. Small objects (gloves, goggles) often need `imgsz 960` or more; compare in a second run.
 
+### 6c. ViT judges (second-opinion verifiers for the assessment service)
+Three vision transformers check the rule engine's claim on a crop (helmet, vest, fire/smoke); their probabilities are
+averaged. Design: `../visionguard/ARCHITECTURE_V3_ASSESSMENT.md`. Results: `reports/vit_judges_report.md`.
+```bash
+# 1. Crops from the combined dataset (each split kept) -> data/processed/judge_crops/{train,val,test}/<class>/  (~33k crops)
+python scripts/10_build_judge_crops.py
+# 2. Train ViT-S/16 (AugReg), ViT-S/14 (DINOv2), Swin-T: 5 epochs, <= 4000 crops/class -> runs/judge/<arch>/best.pt
+python scripts/11_train_vit_judges.py                     # all three, ~2 h on a base M4 plugged in
+python scripts/11_train_vit_judges.py --arch swin_t       # one model again (no resume: restarts from epoch 1)
+# 3. Evaluate each model + the ensemble, pick thresholds on val, report on test
+python scripts/12_eval_vit_judges.py                      # -> reports/vit_judges_report.md, runs/judge/thresholds.yaml
+# 4. Head crops cut from PERSON boxes, as the assessment service does at run time (picks the head-crop rule)
+python scripts/13_check_runtime_head_crops.py
+```
+Result (test crops; thresholds chosen on val):
+
+| Model | Val balanced acc | Test 7-class acc | Helmet AUC | Vest AUC | Fire/smoke AUC |
+|---|---|---|---|---|---|
+| ViT-S/16 AugReg | 0.948 | 94.3 % | 0.998 | 0.978 | 0.9998 |
+| ViT-S/14 DINOv2 | 0.947 | 93.7 % | 0.999 | 0.980 | 0.999 |
+| Swin-T | 0.952 | 94.1 % | 0.999 | 0.980 | 0.999 |
+| **Ensemble (mean)** | | **94.7 %** | **0.9992** | **0.982** | **0.9998** |
+
+Ensemble thresholds (`runs/judge/thresholds.yaml`): helmet reject < 0.34 / confirm >= 0.58, vest 0.22 / 0.75,
+fire/smoke 0.78 / 0.78 (stricter policy: keeps >= 99.5 % of real hazards on val; the first policy, 98 %, put the cut at
+0.94 and flagged 3.1 % of real test hazards). ~0.1 s per incident for all three models on the M4 GPU.
+Weakest: the vest check (3.3 % of real no-vest crops would be flagged "likely false", 6.7 % unsure).
+Run-time head crops (script 13, 1,141 test persons): the service only has the person box. A head square of
+min(0.6 x width, 0.3 x height) + 15 % gives helmet AUC 0.987 (vs 0.975 for min(width, 0.3 x height) + 25 %, and 0.999 on
+labelled head boxes); CONFIRMED precision there is ~95 %, not 98 %. Choosing helmet thresholds on run-time crops is the
+next improvement. Copy `runs/judge/` as one folder to deploy it (model paths in thresholds.yaml are relative).
+Speed lesson: a base M4 (10-core GPU) trains ViT-S at ~48 img/s plugged in, about half that on battery or in Low
+Power Mode, and the whole laptop becomes sluggish while it runs. bf16/fp16 autocast gave no real gain on MPS.
 ---
 
 ## 7. Interpreting results

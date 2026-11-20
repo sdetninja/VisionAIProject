@@ -108,8 +108,10 @@ def annotate(img, event: dict, draw=True, blur=False):
 
 
 def collect_evidence(event: dict, fetch: FrameFetcher, store: EvidenceStore, incident_key: str,
-                     max_frames=3, quality=85, draw=True, blur=False) -> list:
-    """Return stored URIs. Picks up to max_frames evenly spaced from evidence_frames; failures are skipped."""
+                     max_frames=3, quality=85, draw=True, blur=False, raw_out: Optional[list] = None) -> list:
+    """Return stored URIs. Picks up to max_frames evenly spaced from evidence_frames; failures are skipped.
+    raw_out: if a list is given, an UNANNOTATED copy of each frame (faces still blurred if `blur`) is also stored and
+    {"uri", "event_id", "frame_id"} appended to it. The assessment service judges these: drawn boxes would bias it."""
     frames = list(event.get("evidence_frames") or [])
     if not frames:
         return []
@@ -122,6 +124,13 @@ def collect_evidence(event: dict, fetch: FrameFetcher, store: EvidenceStore, inc
         if img is None:
             continue
         ok, buf = cv2.imencode(".jpg", annotate(img, event, draw, blur), [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if ok:
-            uris.append(store.put(f"{event['camera_id']}/{incident_key}/{event['event_id'][:8]}_{fid}.jpg", buf.tobytes()))
+        if not ok:
+            continue
+        base = f"{event['camera_id']}/{incident_key}/{event['event_id'][:8]}_{fid}"
+        uris.append(store.put(base + ".jpg", buf.tobytes()))
+        if raw_out is not None:
+            ok, raw = cv2.imencode(".jpg", _blur_faces(img.copy()) if blur else img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if ok:
+                raw_out.append({"uri": store.put(base + "_raw.jpg", raw.tobytes()), "event_id": event["event_id"],
+                                "frame_id": int(fid)})
     return uris

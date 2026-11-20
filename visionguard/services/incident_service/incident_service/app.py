@@ -57,9 +57,13 @@ def create_app(cfg=None, service=None, publisher=None):
 
     @app.get("/incidents")
     def list_incidents(status: Optional[str] = None, camera_id: Optional[str] = None, zone: Optional[str] = None,
-                       needs_review: Optional[bool] = None, limit: int = 50, offset: int = 0):
-        items, total = service.list(status=status, camera_id=camera_id, zone=zone, needs_review=needs_review,
-                                    limit=min(limit, 200), offset=offset)
+                       needs_review: Optional[bool] = None, judge_verdict: Optional[str] = None, sort: str = "newest",
+                       limit: int = 50, offset: int = 0):
+        try:
+            items, total = service.list(status=status, camera_id=camera_id, zone=zone, needs_review=needs_review,
+                                        judge_verdict=judge_verdict, sort=sort, limit=min(limit, 200), offset=offset)
+        except M.IncidentError as e:
+            raise HTTPException(422, str(e))
         return {"total": total, "items": items}
 
     @app.get("/incidents/{iid}")
@@ -68,6 +72,16 @@ def create_app(cfg=None, service=None, publisher=None):
             return service.get(iid)
         except M.NotFound:
             raise HTTPException(404, "incident not found")
+
+    @app.post("/incidents/{iid}/assessment")
+    def assessment(iid: str, body: dict):
+        """Written by the assessment service only (internal network; M6 does not expose it)."""
+        try:
+            return service.record_assessment(iid, body)
+        except M.NotFound:
+            raise HTTPException(404, "incident not found")
+        except M.InvalidAssessment as e:
+            raise HTTPException(422, str(e))
 
     @app.post("/incidents/{iid}/review")
     def review(iid: str, body: Review):

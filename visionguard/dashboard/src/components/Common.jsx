@@ -1,5 +1,9 @@
 import React from "react";
-import { STATUS_LABEL, errorMessage } from "../format.js";
+import { STATUS_LABEL, errorMessage, verdictLabel } from "../format.js";
+
+export function VerdictBadge({ verdict }) {
+  return <span className={`badge jv-${(verdict || "pending").toLowerCase()}`}>{verdictLabel(verdict)}</span>;
+}
 
 export function SeverityBadge({ severity }) {
   if (!severity) return <span className="badge sev-none">Pending</span>;

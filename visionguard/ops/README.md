@@ -1,6 +1,6 @@
 # M9 - Platform, Security & Observability
 
-Makes the safety path **visible**: if a camera goes blind, an outbox row dies, or a notification never gets delivered, someone
+Makes the safety path **visible**: if a camera goes blind, an outbox row dies, or the assessment service stops judging, someone
 is paged. A silent system looks identical to a safe factory, so the alerts here focus on silence and dead letters first.
 
 ## Status: what is and isn't verified
@@ -20,7 +20,7 @@ tested as pure ASGI), the GitHub workflow, tracing/Loki/Vault/Kubernetes (not bu
 ## What's here
 - `vg_obs/` - stdlib-only helpers: `metrics.py` (Prometheus text format), `http.py` (ASGI middleware: request id, RED metrics,
   `/metrics`; plus `serve_metrics(port)` for CLI workers), `logs.py` (JSON logs, context binding, redaction), `collectors.py`
-  (domain metrics for M2-M5, derived from the DB at scrape time).
+  (domain metrics for M2-M4, derived from the DB at scrape time; v3: M5 removed).
 - `deploy/` - compose file, one parametrised Dockerfile, Prometheus config + alert rules, Grafana dashboard, `.env.example`.
 - `ci/github-workflow.yml` - tests per service, dashboard build, `promtool` + `compose config` lint, Trivy scan, gitleaks.
 
@@ -42,7 +42,7 @@ Gateway: 127.0.0.1:8000, Prometheus: :9090, Grafana: :3001 (loopback only). Comp
 `/data/results/CAM_001.jsonl` on the shared volume - run M1 on the host and mount/copy its JSONL there.
 
 ## Alerts (deploy/prometheus/alerts.yml)
-Critical: CameraDown, PipelineNotProcessingFrames, ServiceDown, OutboxDeadLetters, NotificationsDead.
+Critical: CameraDown, PipelineNotProcessingFrames, ServiceDown, OutboxDeadLetters. Warning: AssessmentsFailing (v3; replaces NotificationsDead).
 Warning: FrameDropRateHigh, InferenceSlow (80 ms budget), OutboxBacklog, IncidentsUnreviewed (>30 min), GatewayErrors,
 GatewayAuthFailuresSpike, LowReviewPrecision (>50% false positives, needs 20+ reviews), LLMFallbackHigh.
 There is no Alertmanager yet: alerts show in Prometheus/Grafana but do not page anyone until you add one with a receiver.
@@ -63,5 +63,5 @@ Thresholds are initial guesses.
 - No TLS termination, Kubernetes/Helm/ArgoCD, Loki, OpenTelemetry tracing, Vault, or GPU (DCGM) monitoring.
 - No Alertmanager (see above), no backup/restore of the DB and evidence volume, no retention job for evidence (privacy policy
   requires one: 30-90 days in the architecture doc).
-- Worker counters are per-process; DB-derived gauges (incidents, outbox, notifications) are the reliable ones.
+- Worker counters are per-process; DB-derived gauges (incidents, outbox, judge verdicts) are the reliable ones.
 - Metrics inherit M1's `camera_id` label; the cardinality cap (500 series/metric) protects against runaway labels.

@@ -23,7 +23,7 @@ export default function App() {
     <div className="app">
       <header>
         <strong>VisionGuard</strong>
-        <nav>{tab("queue", "Incidents")}{tab("cameras", "Cameras")}{role !== "viewer" && tab("admin", role === "admin" ? "Admin" : "Notifications")}</nav>
+        <nav>{tab("queue", "Incidents")}{tab("cameras", "Cameras")}{role === "admin" && tab("admin", "Admin")}</nav>
         <span className="muted">{claims.sub} · {role}</span>
         <button onClick={logout}>Sign out</button>
       </header>
@@ -31,7 +31,7 @@ export default function App() {
         {view.name === "queue" && <Queue api={api} onOpen={(id) => setView({ name: "incident", id })} />}
         {view.name === "incident" && <IncidentDetail api={api} id={view.id} role={role} onBack={() => setView({ name: "queue" })} />}
         {view.name === "cameras" && <Cameras api={api} />}
-        {view.name === "admin" && <Admin api={api} role={role} />}
+        {view.name === "admin" && role === "admin" && <Admin api={api} />}
       </main>
     </div>
   );

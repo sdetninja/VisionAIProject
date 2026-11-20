@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Local VisionGuard stack: M1 -> M2 -> M3 -> M4/M5 -> M6 gateway -> M7 dashboard, with the combined PPE + fire/smoke model.
+# Local VisionGuard stack (architecture v3): M1 -> M2 -> M3 -> assessment service -> M6 gateway -> M7 dashboard,
+# with the combined PPE + fire/smoke model and the ViT judges (milestone0/runs/judge, see ARCHITECTURE_V3_ASSESSMENT.md).
 # Runs the same commands as visionguard/MANUAL_TESTING.md (section C), each in the background with a log file.
 #
 #   visionguard/scripts/dev_stack.sh start clip     # replay services/vision_pipeline/samples/combined_demo.mp4 (36 s)
 #   visionguard/scripts/dev_stack.sh start webcam   # laptop webcam (macOS asks the terminal app for camera access)
 #   visionguard/scripts/dev_stack.sh status         # which services answer on their ports
 #   visionguard/scripts/dev_stack.sh token [role]   # dashboard login token (admin | reviewer | viewer), default admin
-#   visionguard/scripts/dev_stack.sh logs <name>    # tail one log: m1 m2 m3 m3api m4 m4api m5 m5api m6 m7
+#   visionguard/scripts/dev_stack.sh logs <name>    # tail one log: m1 m2 m3 m3api m4 m6 m7
 #   visionguard/scripts/dev_stack.sh stop
 #   visionguard/scripts/dev_stack.sh reset          # stop, then move all runtime data to .dev/backup-<time> (fresh start)
 #
-# Ports: M6 gateway 8000, M1 8001, M3 8003, M4 8004, M5 8005, dashboard 3000. Logs and PIDs: visionguard/.dev/
+# Fire/smoke LLM panel (Claude Opus 5.5 + Sonnet 5.5): export ANTHROPIC_API_KEY and JUDGE_PANEL=anthropic before start.
+# Without it fire/smoke verdicts are UNSURE (a person decides). JUDGE_THRESHOLDS overrides the ViT judge file.
+# Ports: M6 gateway 8000, M1 8001, M3 8003, assessment service (M4) 8004, dashboard 3000. Logs and PIDs: visionguard/.dev/
 set -euo pipefail
 
 VG="$(cd "$(dirname "$0")/.." && pwd)"
@@ -56,7 +59,9 @@ start() {
     *) echo "mode must be clip or webcam"; exit 2 ;;
   esac
   ensure_env
-  mkdir -p "$SVC/incident_service/data" "$SVC/agent_service/data" "$SVC/notification_service/data" "$SVC/backend_api/data"
+  mkdir -p "$SVC/incident_service/data" "$SVC/backend_api/data"
+  local judge="${JUDGE_THRESHOLDS:-$VG/../milestone0/runs/judge/thresholds.yaml}"
+  [[ -f "$judge" ]] || echo "  NOTE: $judge not found: PPE incidents get NO_JUDGE (train the judges: milestone0 scripts 10-12)"
   echo "Starting VisionGuard ($mode)"
   # downstream first: every --follow reader waits for its input file, so nothing is missed when M1 starts
   run m2    "$SVC/rule_engine" "$PY" -m rule_engine --config configs/rules.combined.yaml \
@@ -65,15 +70,11 @@ start() {
               --input ../rule_engine/out/events.jsonl --follow
   run m3api "$SVC/incident_service" env INCIDENT_CONFIG=configs/incident.dev.yaml INCIDENT_OUTBOX=0 \
               "$PY" -m uvicorn incident_service.app:create_app --factory --port 8003
+  # assessment service: one process (worker + small API on 8004), so the three ViT models are loaded once
   run m4    "$SVC/agent_service" "$PY" -m agent_service --bus ../incident_service/data/bus/events.jsonl \
-              --kb knowledge_base --risk-config configs/risk.example.yaml --db data/agent.db --llm "${LLM_KIND:-template}" --follow
-  run m4api "$SVC/agent_service" env KB_DIR=knowledge_base RISK_CONFIG=configs/risk.example.yaml AGENT_DB=data/agent.db \
-              LLM_KIND="${LLM_KIND:-template}" "$PY" -m uvicorn agent_service.app:create_app --factory --port 8004
-  run m5    "$SVC/notification_service" "$PY" -m notification_service --config configs/notify.dev.yaml \
-              --bus ../incident_service/data/bus/events.jsonl --bus ../agent_service/data/analyses.jsonl --follow
-  run m5api "$SVC/notification_service" env NOTIFY_CONFIG=configs/notify.dev.yaml \
-              "$PY" -m uvicorn notification_service.app:create_app --factory --port 8005
-  run m6    "$SVC/backend_api" "$PY" -m uvicorn backend_api.app:create_app --factory --port 8000
+              --m3-url http://127.0.0.1:8003 --kb knowledge_base --risk-config configs/risk.example.yaml \
+              --judge "$judge" --panel "${JUDGE_PANEL:-none}" --llm "${LLM_KIND:-template}" --port 8004 --follow
+  run m6   "$SVC/backend_api" "$PY" -m uvicorn backend_api.app:create_app --factory --port 8000
   run m7    "$VG/dashboard" npm run dev
   wait_port 8000 30
   # M1 last: the clip starts playing as soon as M1 is up
@@ -99,14 +100,14 @@ stop() {
 }
 
 status() {
-  for pair in "M6 gateway:8000" "M1 vision:8001" "M3 incidents:8003" "M4 agent:8004" "M5 notify:8005"; do
+  for pair in "M6 gateway:8000" "M1 vision:8001" "M3 incidents:8003" "M4 assessment:8004"; do
     name="${pair%%:*}"; port="${pair##*:}"
     code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/health" || true)"
     printf "  %-14s :%s  %s\n" "$name" "$port" "$([[ "$code" == 200 ]] && echo up || echo "DOWN ($code)")"
   done
   code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000 || true)"
   printf "  %-14s :%s  %s\n" "M7 dashboard" 3000 "$([[ "$code" == 200 ]] && echo up || echo "DOWN ($code)")"
-  for w in m2 m3 m4 m5; do
+  for w in m2 m3 m4; do
     if [[ -f "$PIDS/$w.pid" ]] && kill -0 "$(cat "$PIDS/$w.pid")" 2>/dev/null; then s=running; else s=stopped; fi
     printf "  %-14s       %s\n" "$w worker" "$s"
   done
@@ -117,11 +118,11 @@ case "${1:-}" in
   stop)   stop ;;
   status) status ;;
   token)  ensure_env; cd "$SVC/backend_api" && "$PY" -m backend_api token --sub "${3:-dev}" --role "${2:-admin}" ;;
-  logs)   tail -f "$LOGS/${2:?name: m1 m2 m3 m3api m4 m4api m5 m5api m6 m7}.log" ;;
+  logs)   tail -f "$LOGS/${2:?name: m1 m2 m3 m3api m4 m6 m7}.log" ;;
   reset)
     stop
     b="$DEV/backup-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$b"
-    for d in agent_service/data backend_api/data incident_service/data notification_service/data rule_engine/out vision_pipeline/out; do
+    for d in agent_service/data backend_api/data incident_service/data rule_engine/out vision_pipeline/out; do
       if [[ -e "$SVC/$d" ]]; then mkdir -p "$b/$(dirname "$d")"; mv "$SVC/$d" "$b/$d"; fi
     done
     echo "Runtime data moved to $b" ;;

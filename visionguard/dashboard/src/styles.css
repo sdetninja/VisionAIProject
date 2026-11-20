@@ -25,6 +25,9 @@ textarea { width:100%; }
 .sev-low { background:#e3f4e8; color:#1b6b34; } .sev-medium { background:#fff3cd; color:#7a5b00; }
 .sev-high { background:#ffe0cc; color:#9a3d00; } .sev-critical { background:#d92d20; color:#fff; } .sev-none { background:#eceff3; color:var(--muted); }
 .st-open { background:#e8efff; color:#0b3fb3; } .st-confirmed { background:#ffe0cc; color:#9a3d00; } .st-resolved { background:#e3f4e8; color:#1b6b34; }
+.jv-confirmed { background:#ffe0cc; color:#9a3d00; } .jv-likely_false { background:#e3f4e8; color:#1b6b34; }
+.jv-unsure { background:#fff3cd; color:#7a5b00; } .jv-no_judge, .jv-not_applicable, .jv-pending { background:#eceff3; color:var(--muted); }
+.scores { border-collapse:collapse; font-size:13px; margin:6px 0; } .scores td, .scores th { padding:2px 10px 2px 0; text-align:left; }
 .badge.warn { background:#fff3cd; color:#7a5b00; } .badge.advisory { background:#eceff3; color:var(--muted); font-weight:400; }
 .banner { padding:8px 12px; border-radius:6px; margin:8px 0; } .banner.error { background:#fde8e6; color:#8a1c12; } .banner.warn { background:#fff3cd; color:#7a5b00; }
 .muted { color:var(--muted); } .small { font-size:12px; } .center { text-align:center; }

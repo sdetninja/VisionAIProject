@@ -1,10 +1,15 @@
 pyyaml
+pillow             # judge crops
+# ViT judges (assessment service). Without them PPE verdicts are NO_JUDGE; tests use stub models.
+torch
+torchvision
+timm>=1.0
 fastapi>=0.110
 uvicorn[standard]
 httpx
 pytest
 # optional
-# anthropic          # AnthropicLLM (LLM explanation; system works without it)
+# anthropic          # LLM explanation and the fire/smoke LLM panel (system works without it: verdicts UNSURE)
 # qdrant-client      # vector retrieval (BM25 used by default)
 # sentence-transformers
 # langgraph          # not required; the pipeline is a plain ordered graph

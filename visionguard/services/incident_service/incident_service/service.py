@@ -22,7 +22,7 @@ class IncidentService:
     def __init__(self, cfg: Config, repo, store: EvidenceStore, fetch: Optional[FrameFetcher] = None):
         self.cfg, self.repo, self.store, self.fetch = cfg, repo, store, fetch
         self._lock = threading.Lock()   # serialises ingest so grouping is race-free in one process
-        self.counters = {"events": 0, "duplicates": 0, "created": 0, "merged": 0, "rejected": 0}
+        self.counters = {"events": 0, "duplicates": 0, "created": 0, "merged": 0, "rejected": 0, "assessed": 0}
 
     # ------------------------------------------------------------------ ingest
     def ingest(self, ev: dict) -> dict:
@@ -42,12 +42,12 @@ class IncidentService:
 
             # Evidence fetched BEFORE the transaction: slow I/O must not hold the DB lock.
             # Orphaned JPEGs after a rollback are harmless; keys are deterministic per event.
-            uris = []
+            uris, raw = [], ([] if self.cfg.keep_raw_evidence else None)
             if self.fetch:
                 try:
                     uris = collect_evidence(ev, self.fetch, self.store, ev["idempotency_key"].replace("|", "_")[:60],
                                             self.cfg.max_evidence_frames, self.cfg.jpeg_quality,
-                                            self.cfg.draw_boxes, self.cfg.blur_faces)
+                                            self.cfg.draw_boxes, self.cfg.blur_faces, raw)
                 except Exception:
                     log.exception("evidence collection failed; continuing without")
             ev_status = "ok" if uris else ("missing" if ev.get("evidence_frames") else "none")
@@ -55,17 +55,17 @@ class IncidentService:
             with self.repo.transaction():
                 inc = self.repo.find_mergeable(ev, M.ACTIVE, ets - self.cfg.merge_window_sec)
                 if inc:
-                    iid = self._merge(inc, ev, ets, uris, ev_status)
+                    iid = self._merge(inc, ev, ets, uris, ev_status, raw or [])
                     action, topic = "merged", M.TOPIC_UPDATED
                 else:
-                    iid = self._create(ev, ets, uris, ev_status)
+                    iid = self._create(ev, ets, uris, ev_status, raw or [])
                     action, topic = "created", M.TOPIC_CREATED
                 self.repo.insert_event(ev, iid)
                 self.repo.enqueue(topic, iid, self._envelope(iid, topic))
             self.counters["created" if action == "created" else "merged"] += 1
             return {"incident_id": iid, "action": action}
 
-    def _create(self, ev, ets, uris, ev_status) -> str:
+    def _create(self, ev, ets, uris, ev_status, raw) -> str:
         review = bool(ev.get("needs_review")) or ev["event_type"] in self.cfg.review_required_types
         iid = self.repo.create_incident({
             "event_type": ev["event_type"], "camera_id": ev["camera_id"], "zone": ev["zone"],
@@ -74,11 +74,11 @@ class IncidentService:
             "status": M.OPEN, "needs_review": review, "confidence": float(ev.get("confidence") or 0),
             "first_event_time": ev.get("first_seen_at") or ev["timestamp"], "last_event_time": ev["timestamp"],
             "last_event_ts": ets, "evidence_uris": uris, "thumbnail_uri": uris[0] if uris else None,
-            "evidence_status": ev_status})
+            "evidence_status": ev_status, "raw_evidence": raw})
         self.repo.add_history(iid, "system", None, M.OPEN, "created from " + ev["event_id"])
         return iid
 
-    def _merge(self, inc, ev, ets, uris, ev_status) -> str:
+    def _merge(self, inc, ev, ets, uris, ev_status, raw) -> str:
         iid = inc["incident_id"]
         rules = inc["rule_ids"] + ([ev["rule_id"]] if ev.get("rule_id") and ev["rule_id"] not in inc["rule_ids"] else [])
         all_uris = inc["evidence_uris"] + uris
@@ -87,7 +87,7 @@ class IncidentService:
             needs_review=inc["needs_review"] or bool(ev.get("needs_review")),
             confidence=max(inc["confidence"], float(ev.get("confidence") or 0)),
             last_event_time=ev["timestamp"], last_event_ts=max(inc["last_event_ts"], ets),
-            event_count=inc["event_count"] + 1, evidence_uris=all_uris,
+            event_count=inc["event_count"] + 1, evidence_uris=all_uris, raw_evidence=inc["raw_evidence"] + raw,
             thumbnail_uri=inc["thumbnail_uri"] or (uris[0] if uris else None),
             evidence_status="ok" if all_uris else ev_status)
         return iid
@@ -127,9 +127,22 @@ class IncidentService:
             raise M.NotFound(iid)
         inc["history"] = self.repo.history(iid)
         inc["events"] = self.repo.events_of(iid)
+        inc["assessment"] = self.repo.latest_assessment(iid)
         return inc
 
+    def record_assessment(self, iid: str, a: dict) -> dict:
+        """Store the assessment service's result (judge verdict, risk, explanation) for one incident version."""
+        a = {**a, "incident_id": iid}
+        M.validate_assessment(a)
+        if not self.repo.get_incident(iid):
+            raise M.NotFound(iid)
+        current = self.repo.add_assessment(a)
+        self.counters["assessed"] += 1
+        return {"incident_id": iid, "incident_version": a["incident_version"], "verdict": a["verdict"], "current": current}
+
     def list(self, **kw):
+        if kw.get("sort", "newest") not in M.SORTS:
+            raise M.IncidentError(f"sort must be one of {M.SORTS}")
         return self.repo.list_incidents(**kw)
 
     def stats(self) -> dict:

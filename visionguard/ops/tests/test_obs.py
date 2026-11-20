@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, "../services/incident_service")
 
 from vg_obs import logs
-from vg_obs.collectors import register_agent, register_incident, register_notification
+from vg_obs.collectors import register_assessment, register_incident
 from vg_obs.http import ObsMiddleware, normalize_path, serve_metrics
 from vg_obs.metrics import Counter, Gauge, Histogram, CallbackMetric, Registry
 import vg_obs.metrics as metrics_mod
@@ -208,11 +208,11 @@ def test_oldest_open_age_uses_open_incidents_only():
     assert s["oldest_open_age_s"] == 1800 and s["by_status"]["OPEN"] == 2 and s["by_status"]["CONFIRMED"] == 1
 
 
-def test_agent_and_notify_collectors():
-    class A: counters = {"analyzed": 4, "cached": 1, "fallback": 2, "skipped": 0}
-    class St:
-        def stats(self): return {"PENDING": 2, "DEAD": 1}
-    class N: counters = {"sent": 5, "dead": 1}; store = St()
-    r = Registry(); register_agent(A, r); register_notification(N, r)
+def test_assessment_collector():
+    class A:
+        counters = {"assessed": 4, "cached": 1, "fallback": 2, "skipped": 0, "failed": 0, "judge_seconds": 1.5, "llm_cost_usd": 0.06}
+        verdicts = {"CONFIRMED": 3, "LIKELY_FALSE": 1}
+    r = Registry(); register_assessment(A, r)
     out = r.render()
-    assert 'vg_agent_events_total{kind="fallback"} 2' in out and 'vg_notifications{status="DEAD"} 1' in out
+    assert 'vg_assessment_events_total{kind="fallback"} 2' in out and 'vg_assessment_verdicts_total{verdict="LIKELY_FALSE"} 1' in out
+    assert "vg_assessment_llm_cost_usd_total 0.06" in out

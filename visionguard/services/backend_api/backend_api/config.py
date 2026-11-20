@@ -9,9 +9,7 @@ class Settings:
     audience: str = "visionguard-api"
     issuer: str = "visionguard"
     vision_url: str = "http://localhost:8001"
-    incident_url: str = "http://localhost:8003"
-    agent_url: str = "http://localhost:8004"
-    notify_url: str = "http://localhost:8005"
+    incident_url: str = "http://localhost:8003"       # incidents AND their assessments (v3: M4/M5 are not called)
     audit_db: str = "data/audit.db"
     cors_origins: list = field(default_factory=lambda: ["http://localhost:3000"])
     rate_limit_per_min: int = 120
@@ -20,8 +18,7 @@ class Settings:
     def from_env(cls):
         e, s = os.environ.get, cls()
         for f, k in (("audience", "VG_AUDIENCE"), ("issuer", "VG_ISSUER"), ("vision_url", "VG_VISION_URL"),
-                     ("incident_url", "VG_INCIDENT_URL"), ("agent_url", "VG_AGENT_URL"), ("notify_url", "VG_NOTIFY_URL"),
-                     ("audit_db", "VG_AUDIT_DB")):
+                     ("incident_url", "VG_INCIDENT_URL"), ("audit_db", "VG_AUDIT_DB")):
             if e(k):
                 setattr(s, f, e(k))
         if e("VG_CORS_ORIGINS"):

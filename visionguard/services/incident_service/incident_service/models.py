@@ -17,6 +17,17 @@ TOPIC_UPDATED = "incident.updated.v1"
 TOPIC_STATUS = "incident.status_changed.v1"
 SCHEMA_VERSION = "1.0"
 
+VERDICTS = ("CONFIRMED", "LIKELY_FALSE", "UNSURE", "NO_JUDGE", "NOT_APPLICABLE")   # assessment service judge verdicts
+SORTS = ("newest", "priority")
+
+
+def validate_assessment(a: dict) -> None:
+    for k in ("incident_version", "verdict", "judge_mode"):
+        if not a.get(k):
+            raise InvalidAssessment(f"assessment missing {k}")
+    if a["verdict"] not in VERDICTS:
+        raise InvalidAssessment(f"verdict must be one of {VERDICTS}")
+
 
 class IncidentError(Exception):
     pass
@@ -31,6 +42,10 @@ class InvalidTransition(IncidentError):
 
 
 class InvalidEvent(IncidentError):
+    pass
+
+
+class InvalidAssessment(IncidentError):
     pass
 
 

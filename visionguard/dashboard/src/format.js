@@ -15,6 +15,23 @@ export function actionsFor(status, role) {
 }
 export const ACTION_LABEL = { start_review: "Start review", confirm: "Confirm", reject: "Mark false positive", resolve: "Resolve" };
 
+// Judge verdicts from the assessment service (ARCHITECTURE_V3_ASSESSMENT.md). Advisory: people decide.
+export const VERDICT_LABEL = {
+  CONFIRMED: "Judge: confirmed", LIKELY_FALSE: "Judge: likely false alarm", UNSURE: "Judge: unsure",
+  NO_JUDGE: "No judge", NOT_APPLICABLE: "No judge needed",
+};
+export function verdictLabel(verdict) {
+  return verdict ? VERDICT_LABEL[verdict] || verdict : "Judge: pending";
+}
+// Fire/smoke "likely false" is only a flag: it is never moved down the queue, so say so.
+export function verdictNote(verdict, eventType) {
+  if (verdict !== "LIKELY_FALSE") return "";
+  return eventType === "HAZARD_DETECTED"
+    ? "All three judges think this is not fire or smoke. It stays at full priority: please check the images."
+    : "The judge thinks the PPE is actually being worn. This incident is moved down the queue; please still check it.";
+}
+export function pct(p) { return p == null ? "–" : `${Math.round(p * 100)}%`; }
+
 export function describeIncident(i) {
   const type = (i.event_type || "").replace(/_/g, " ").toLowerCase();
   if (i.event_type === "PPE_VIOLATION") return `Missing ${(i.missing_ppe || []).join(", ") || "PPE"}`;

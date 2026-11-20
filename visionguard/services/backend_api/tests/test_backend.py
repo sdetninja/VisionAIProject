@@ -29,7 +29,9 @@ def status_of(fn, *a, **k):
 
 # ---- fakes
 INCS = {
-    "INC-1": {"incident_id": "INC-1", "camera_id": "CAM_001", "status": "OPEN", "evidence_uris": ["file://CAM_001/a.jpg", "file://CAM_001/b.jpg"], "thumbnail_uri": "file://CAM_001/a.jpg", "events": [{"x": 1}]},
+    "INC-1": {"incident_id": "INC-1", "camera_id": "CAM_001", "status": "OPEN", "evidence_uris": ["file://CAM_001/a.jpg", "file://CAM_001/b.jpg"], "thumbnail_uri": "file://CAM_001/a.jpg", "events": [{"x": 1}],
+              "raw_evidence": [{"uri": "file://CAM_001/a_raw.jpg", "event_id": "e", "frame_id": 1}], "assessed_version": "v1",
+              "judge_verdict": "CONFIRMED", "assessment": {"verdict": "CONFIRMED", "severity": "HIGH"}},
     "INC-2": {"incident_id": "INC-2", "camera_id": "CAM_002", "status": "OPEN", "evidence_uris": [], "thumbnail_uri": None},
     "INC-3": {"incident_id": "INC-3", "camera_id": "CAM_001", "status": "OPEN", "evidence_uris": []},
 }
@@ -54,26 +56,14 @@ class FakeIncidents:
         return {**INCS["INC-1"], "status": "CONFIRMED"}
 
 
-class FakeAgent:
-    def __init__(self): self.down = False
-    def get(self, path, **q):
-        if self.down: raise ApiError(503, "x")
-        return {"severity": "HIGH"}
-
-
 class FakeVision:
     def get(self, path, **q):
         return [{"camera_id": "CAM_001"}, {"camera_id": "CAM_002"}] if path == "/cameras" else {"cam": path}
 
 
-class FakeNotify:
-    def get(self, path, **q): return [{"id": 1}]
-    def post(self, path, body=None, **q): return {"requeued": 2}
-
-
 def make():
-    inc, agent = FakeIncidents(), FakeAgent()
-    return Gateway(FakeVision(), inc, agent, FakeNotify(), AuditLog(":memory:", clock=lambda: NOW)), inc, agent
+    inc = FakeIncidents()
+    return Gateway(FakeVision(), inc, AuditLog(":memory:", clock=lambda: NOW)), inc, None
 
 
 P = lambda role="reviewer", cams=None, sub="alice": Principal(sub, role, cams)
@@ -108,7 +98,6 @@ def test_viewer_cannot_review_or_admin():
     g, inc, _ = make()
     assert status_of(g.review, P("viewer"), "INC-1", "confirm") == 403
     assert status_of(g.labels, P("reviewer")) == 403
-    assert status_of(g.requeue_notifications, P("reviewer")) == 403
     assert status_of(g.audit_log, P("viewer")) == 403
     assert inc.posts == []
     assert g.labels(P("admin")) and g.audit_log(P("admin"))["chain_valid"]
@@ -165,8 +154,10 @@ def test_raw_storage_uris_never_exposed():
     blob = json.dumps(r)
     assert "file://" not in blob and "events" not in r
     assert r["evidence"] == ["/api/incidents/INC-1/evidence/0", "/api/incidents/INC-1/evidence/1"]
-    assert r["analysis"]["severity"] == "HIGH"
-    assert "file://" not in json.dumps(g.list_incidents(P("viewer")))
+    assert r["assessment"] == {"verdict": "CONFIRMED", "severity": "HIGH"} and r["judge_verdict"] == "CONFIRMED"
+    assert "raw_evidence" not in r and "assessed_version" not in r
+    lst = g.list_incidents(P("viewer"))
+    assert "file://" not in json.dumps(lst) and "assessment" not in lst["items"][0]
 
 
 def test_evidence_index_bounds_and_audit():
@@ -177,10 +168,14 @@ def test_evidence_index_bounds_and_audit():
     assert g.audit.list()[0]["action"] == "evidence.view"
 
 
-def test_agent_down_degrades_gracefully():
-    g, _, agent = make()
-    agent.down = True
-    assert g.get_incident(P("viewer"), "INC-1")["analysis"] == {"unavailable": True}
+def test_not_yet_assessed_and_sort_passthrough():
+    g, inc, _ = make()
+    assert g.get_incident(P("viewer"), "INC-3")["assessment"] is None          # judged later: the dashboard says "pending"
+    assert status_of(g.list_incidents, P("viewer"), sort="random") == 422
+    seen = []
+    inc.get = (lambda orig: lambda path, **q: (seen.append(q), orig(path, **q))[1])(inc.get)
+    g.list_incidents(P("viewer"), judge_verdict="LIKELY_FALSE", sort="priority")
+    assert seen[0]["sort"] == "priority" and seen[0]["judge_verdict"] == "LIKELY_FALSE"
 
 
 # ---- audit / rate limit

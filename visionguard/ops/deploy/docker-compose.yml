@@ -28,14 +28,15 @@ services:
     build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: incident_service}}
     environment: {INCIDENT_CONFIG: /app/configs/incident.compose.yaml, INCIDENT_OUTBOX: "0"}   # worker owns the outbox; one publisher only
     command: ["uvicorn","incident_service.app:create_app","--factory","--host","0.0.0.0","--port","8003"]
-  agent-worker:
+  assessment-worker:      # v3: judge (ViT ensemble + optional LLM panel) + risk + explanation, written to M3. M5 is removed.
     <<: *svc
     build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: agent_service}}
-    command: ["python","-m","agent_service","--bus","/data/bus/events.jsonl","--kb","knowledge_base","--out","/data/bus/analyses.jsonl","--db","/data/agent.db","--follow","--metrics-port","9100"]
-  notification-worker:
-    <<: *svc
-    build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: notification_service}}
-    command: ["python","-m","notification_service","--config","/app/configs/notify.example.yaml","--bus","/data/bus/events.jsonl","--bus","/data/bus/analyses.jsonl","--follow","--metrics-port","9100"]
+    # ViT judges: copy milestone0/runs/judge (thresholds.yaml + <arch>/best.pt) to ops/deploy/models/judge first.
+    # The fire/smoke LLM panel (--panel anthropic + ANTHROPIC_API_KEY in .env) needs egress through a proxy: the internal
+    # network has no internet. Without it fire/smoke verdicts are UNSURE.
+    volumes: [vgdata:/data, ./models/judge:/models/judge:ro]
+    command: ["python","-m","agent_service","--bus","/data/bus/events.jsonl","--m3-url","http://incident-api:8003","--kb","knowledge_base",
+              "--judge","/models/judge/thresholds.yaml","--panel","none","--host","0.0.0.0","--port","9100","--follow"]
   gateway:
     <<: *svc
     build: {<<: *build, dockerfile: ops/deploy/Dockerfile.service, args: {SERVICE: backend_api}}

@@ -1,46 +1,57 @@
-# M4 – Agent + RAG Service (advisory only)
+# M4 – Assessment service (judge + risk + explanation; advisory only)
 
-Consumes M3 `incident.created/updated.v1`, produces `incident.analyzed.v1`:
-severity + risk score + summary + recommended actions, **grounded in safety standards and your site procedures** (see Knowledge base).
+Architecture v3 (`../../ARCHITECTURE_V3_ASSESSMENT.md`). Package name is still `agent_service`. For every
+`incident.created/updated.v1` on M3's bus it fetches the incident from M3, judges it, scores it, explains it, and
+writes **one assessment per incident version into M3** (`POST /incidents/{id}/assessment` → `assessments` table).
+No database of its own; M5 (notifications) is removed.
 
 ```
-incident ─► risk.py (deterministic score/severity, audit trail)
-         ─► kb.py   (BM25 over knowledge_base/*.md, chunked by heading)
-         ─► llm.py  (writes summary/actions from facts + passages; Template fallback)
-         ─► guardrails.py (valid JSON, citations ⊆ retrieved, no severity contradiction) ─► else template fallback
+M3 bus ─► fetch incident + unannotated frames from M3 (port 8003)
+        ─► judge/      PPE (helmet, vest):  ViT ensemble (ViT-S, DINOv2-S, Swin-T), local
+                       fire / smoke:        ViT ensemble + LLM panel (Claude Opus 5.5 on the crop, Claude Sonnet 5.5 on the frame)
+                       gloves/goggles/mask: NO_JUDGE      restricted area: NOT_APPLICABLE
+        ─► risk.py     deterministic severity + score (unchanged)
+        ─► kb.py + llm.py + guardrails.py   SOP search + template (or Claude) explanation (unchanged)
+        ─► POST /incidents/{id}/assessment to M3
 ```
+
+## Judge
+| File | What |
+|---|---|
+| `judge/crops.py` | crops from the event box: head square `min(0.6 w, 0.3 h)` at the top of the person box +15 %; person box +5 % (vest); fire/smoke box +15 % |
+| `judge/vit.py` | loads the three checkpoints from `milestone0/runs/judge/thresholds.yaml`; claim probability renormalised over the check's classes; ensemble = mean |
+| `judge/panel.py` | the two Claude judges, in parallel, structured outputs `{verdict, confidence, lookalike, reason}`, low effort, `fallbacks: "default"`; any failure = that judge `UNSURE` |
+| `judge/__init__.py` | verdict rules (below); a broken judge gives `NO_JUDGE`, never blocks the incident |
+
+| Incident | Verdict |
+|---|---|
+| PPE item | ensemble mean over the frames: ≥ `confirm_above` → CONFIRMED, < `reject_below` → LIKELY_FALSE, else UNSURE (thresholds from `thresholds.yaml`) |
+| grouped PPE (helmet + vest) | CONFIRMED if any item is; LIKELY_FALSE only if every item is; an unjudged item (gloves) keeps it UNSURE |
+| fire / smoke | both LLMs CONFIRMED → CONFIRMED; ViT < `reject_below` **and** both LLMs REJECTED → LIKELY_FALSE (flagged, never down-ranked); else UNSURE. No API key → UNSURE |
 
 ## Safety design
-- **Severity is never LLM-decided.** `risk.py` computes it from rules/weights in config; the LLM only phrases an explanation and is rejected if it contradicts the severity.
-- Output is always `advisory_only: true`; nothing is enforced automatically.
-- Any LLM failure (API down, bad JSON, invented citation) → deterministic template; the incident is never blocked.
-- No matching SOP passage → `grounded: false`, `needs_human_review: true` (no made-up policy).
-- Idempotent per `(incident_id, incident.updated_at)`; repeat-pattern bonus counts similar incidents (same camera/zone/type) in the last 24h.
+- **Advisory only.** The judge never closes or hides an incident and never lowers severity; M3's `priority` sort moves only
+  PPE `LIKELY_FALSE` to the bottom, never fire/smoke.
+- **Severity is never model-decided.** `risk.py` computes it; the LLM only phrases an explanation and is rejected if it contradicts it.
+- Any LLM or judge failure → template / `UNSURE` / `NO_JUDGE`; the incident is always assessed.
+- No matching SOP passage → `grounded: false` (no made-up policy).
+- Idempotent per `(incident_id, updated_at)`: a version M3 already has an assessment for is not judged again (`force` re-judges).
+- Privacy: PPE images never leave the machine; fire/smoke frames go to the Anthropic API only with `--panel anthropic`.
 
 ## Run
 ```bash
-pip install -r requirements.txt && pytest -q
-python -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base --out data/analyses.jsonl [--follow]
-KB_DIR=knowledge_base uvicorn agent_service.app:create_app --factory --port 8004   # POST /analyze, GET /analyses/{id}, GET /search?q=
-# real LLM: pip install anthropic; export ANTHROPIC_API_KEY=...; --llm anthropic  (or LLM_KIND=anthropic)
+pip install -r requirements.txt && pytest -q        # 31 tests, stub models (no torch needed for the tests)
+python -m agent_service --bus ../incident_service/data/bus/events.jsonl --m3-url http://127.0.0.1:8003 \
+    --kb knowledge_base --risk-config configs/risk.example.yaml \
+    --judge ../../../milestone0/runs/judge/thresholds.yaml --port 8004 --follow
+# fire/smoke LLM panel:  pip install "anthropic>=2.6"; export ANTHROPIC_API_KEY=...; add --panel anthropic
+# Claude-written explanations: --llm anthropic
+curl -s localhost:8004/health                          # counters, verdict counts, loaded judge versions
+curl -s -X POST "localhost:8004/assess/INC-000001?force=true"   # re-judge now (e.g. after retraining the judges)
+curl -s "localhost:8004/search?q=missing+helmet"       # what the explanation step retrieves
 ```
-
-### Sample: analyse M3 incidents with Claude
-The bus file is written by M3, so run M3 first (from `incident_service/`):
-```bash
-python -m incident_service --config configs/incident.example.yaml --input ../rule_engine/out/events.jsonl
-```
-Then, from `agent_service/` with `ANTHROPIC_API_KEY` exported and `pip install "anthropic>=2.6"`:
-```bash
-python -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base --risk-config configs/risk.example.yaml --llm anthropic
-```
-Results go to `data/analyses.jsonl` (one `incident.analyzed.v1` record per line; the analysis is under `payload`).
-Check `explanation_mode`: `llm` = Claude wrote it, `template` = no API key found, `template_fallback` = the call failed or
-a guardrail rejected the answer (reason in `guardrail_problems`). The console only prints severity per incident; read the
-summary and actions from the file:
-```bash
-python -c "import json;[print(json.dumps(json.loads(l)['payload'],indent=2)) for l in open('data/analyses.jsonl')]"
-```
+The result is read from M3: `curl -s localhost:8003/incidents/INC-000001` → `assessment`, and `judge_verdict`,
+`severity`, `risk_score` on the incident. Without `--judge` (or if the file is missing) PPE incidents get `NO_JUDGE`.
 
 ## Knowledge base (`knowledge_base/`)
 Plain-language summaries of the standards behind each detection, one `#` heading per searchable section (kept under
@@ -74,6 +85,12 @@ official URL, and a note that it is a summary, not the official text. Sources ch
 - Tune `configs/risk.example.yaml` weights/thresholds with your safety officer.
 
 ## Limits
-- Retrieval is lexical BM25 (no network/embeddings needed). `QdrantRetriever` is a placeholder for semantic search once the KB grows.
-- Plain ordered pipeline rather than LangGraph (no branching needed yet). `AnthropicLLM` defaults to `claude-sonnet-5-5` at `effort: low` with server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; needs `anthropic` ≥ 2.6). It was checked offline against stubbed SDK responses only and has not made a live API call yet; refusals, truncation or no text all fall back to the template.
-- Tested: 12 tests with `pytest` (retrieval on the real knowledge base, scoring, guardrails, fallbacks, caching, bus handling). Also ran a live M1-M4 clip run and replayed its M3 bus against the current knowledge base: all 8 incidents grounded.
+- The ViTs reach AUC 0.999 (helmet) on labelled head boxes but 0.987 on head crops cut from person boxes, as at run
+  time (`milestone0/scripts/13_check_runtime_head_crops.py`): there, CONFIRMED precision is ~95 % rather than 98 %.
+  The vest check is the weakest (AUC 0.982). Re-measure on reviewed incidents (M3 `labels`).
+- The judge sees the event's box from the confirming frame on all three evidence frames (the event carries one box).
+- The LLM panel was checked against stubbed SDK responses only; it has not made a live API call yet.
+- Retrieval is lexical BM25; `AnthropicLLM` (explanations) defaults to `claude-sonnet-5-5` at `effort: low`.
+- Tested 2026-11-16: 31 tests (judge rules, crops, panel parsing, fake-M3 end to end, idempotency, failures) and a
+  live clip run: 8 incidents, all assessed and stored in M3; PPE judged by the real ViT ensemble (~75 ms per incident on
+  the M4 GPU, 3 s model load), fire/smoke UNSURE without an API key.

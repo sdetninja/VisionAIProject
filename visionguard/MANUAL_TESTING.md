@@ -1,5 +1,8 @@
 # Manual testing: Module 1 + Module 2, then the full stack in the UI
 
+> **Architecture v3 (built 2026-11-16):** M5 is removed; M4 is the assessment service with a judge, and its results are
+> stored in M3. See `ARCHITECTURE_V3_ASSESSMENT.md`.
+
 Model: the combined PPE + fire/smoke YOLO11n from Milestone 0 (`runs/detect/runs/combined-yolo-v2/weights/best.pt`).
 All Python services use one virtualenv that already has every dependency. Paste this line into **every new terminal**:
 
@@ -12,8 +15,7 @@ export VG=~/Desktop/VisionAIProject/visionguard PY=~/Desktop/VisionAIProject/vis
 | M1 vision_pipeline | camera/clip -> YOLO -> tracks; writes `out/results/CAM_001.jsonl`, serves evidence frames | 8001 |
 | M2 rule_engine | M1 results -> confirmed violations/hazards (`out/events.jsonl`) | - |
 | M3 incident_service | events -> incidents + evidence images; publishes to its bus | 8003 |
-| M4 agent_service | incident -> risk score + explanation (template, or Claude with an API key) | 8004 |
-| M5 notification_service | incident + analysis -> notifications (console + `data/notifications.jsonl`) | 8005 |
+| M4 assessment service (`agent_service`) | incident -> judge verdict (3 vision transformers; + 2 Claude models for fire/smoke) + risk score + explanation, stored in M3 | 8004 |
 | M6 backend_api | the only API the UI talks to (login token, roles, audit) | 8000 |
 | M7 dashboard | the UI | 3000 |
 
@@ -32,7 +34,7 @@ The demo clip `services/vision_pipeline/samples/combined_demo.mp4` (36 s, held-o
 
 ## A. Module 1 + Module 2 only (no UI)
 For a presentation (theory, script, readable event viewer, short demo cooldowns) use `DEMO_M1_M2_WEBCAM.md`.
-To add Module 3 (incidents, evidence images, review) and Module 4 (AI risk assessment) without the UI: `TESTING_M1_M2_M3.md`.
+To add Module 3 (incidents, evidence images, review) and the assessment service (judge, risk) without the UI: `TESTING_M1_M2_M3.md`.
 
 ### A1. With the clip
 Terminal 1 - **M2 first** (it waits for M1's output file to appear):
@@ -78,7 +80,7 @@ $VG/scripts/dev_stack.sh token            # copy the printed token
 Open **http://localhost:3000**, paste the token, Sign in. Other commands:
 ```bash
 $VG/scripts/dev_stack.sh status           # which services are up
-$VG/scripts/dev_stack.sh logs m2          # follow one log: m1 m2 m3 m3api m4 m4api m5 m5api m6 m7
+$VG/scripts/dev_stack.sh logs m2          # follow one log: m1 m2 m3 m3api m4 m6 m7
 $VG/scripts/dev_stack.sh stop
 $VG/scripts/dev_stack.sh reset            # stop + move all runtime data to visionguard/.dev/backup-<time>
 ```
@@ -97,42 +99,44 @@ mkdir -p $VG/.dev && [ -f $VG/.dev/env.sh ] || $PY -c "import secrets;print('exp
 | 1 | M2 rules | `cd $VG/services/rule_engine && $PY -m rule_engine --config configs/rules.combined.yaml --input ../vision_pipeline/out/results/CAM_001.jsonl --output out/events.jsonl --follow` |
 | 2 | M3 ingester | `cd $VG/services/incident_service && $PY -m incident_service --config configs/incident.dev.yaml --input ../rule_engine/out/events.jsonl --follow` |
 | 3 | M3 API | `cd $VG/services/incident_service && INCIDENT_CONFIG=configs/incident.dev.yaml INCIDENT_OUTBOX=0 $PY -m uvicorn incident_service.app:create_app --factory --port 8003` |
-| 4 | M4 worker | `cd $VG/services/agent_service && mkdir -p data && $PY -m agent_service --bus ../incident_service/data/bus/events.jsonl --kb knowledge_base --risk-config configs/risk.example.yaml --db data/agent.db --follow` |
-| 5 | M4 API | `cd $VG/services/agent_service && KB_DIR=knowledge_base RISK_CONFIG=configs/risk.example.yaml AGENT_DB=data/agent.db $PY -m uvicorn agent_service.app:create_app --factory --port 8004` |
-| 6 | M5 worker | `cd $VG/services/notification_service && mkdir -p data && $PY -m notification_service --config configs/notify.dev.yaml --bus ../incident_service/data/bus/events.jsonl --bus ../agent_service/data/analyses.jsonl --follow` |
-| 7 | M5 API | `cd $VG/services/notification_service && NOTIFY_CONFIG=configs/notify.dev.yaml $PY -m uvicorn notification_service.app:create_app --factory --port 8005` |
-| 8 | M6 gateway | `cd $VG/services/backend_api && mkdir -p data && source $VG/.dev/env.sh && $PY -m uvicorn backend_api.app:create_app --factory --port 8000` |
-| 9 | M7 dashboard | `cd $VG/dashboard && npm run dev` |
-| 10 | M1 vision | `cd $VG/services/vision_pipeline && CONFIG_PATH=configs/pipeline.combined.clip.yaml $PY -m uvicorn vision_pipeline.app:app --port 8001` (webcam: `configs/pipeline.combined.yaml`) |
+| 4 | M4 assessment | `cd $VG/services/agent_service && $PY -m agent_service --bus ../incident_service/data/bus/events.jsonl --m3-url http://127.0.0.1:8003 --kb knowledge_base --risk-config configs/risk.example.yaml --judge $VG/../milestone0/runs/judge/thresholds.yaml --port 8004 --follow` |
+| 5 | M6 gateway | `cd $VG/services/backend_api && mkdir -p data && source $VG/.dev/env.sh && $PY -m uvicorn backend_api.app:create_app --factory --port 8000` |
+| 6 | M7 dashboard | `cd $VG/dashboard && npm run dev` |
+| 7 | M1 vision | `cd $VG/services/vision_pipeline && CONFIG_PATH=configs/pipeline.combined.clip.yaml $PY -m uvicorn vision_pipeline.app:app --port 8001` (webcam: `configs/pipeline.combined.yaml`) |
 | - | token | `cd $VG/services/backend_api && source $VG/.dev/env.sh && $PY -m backend_api token --sub alice --role admin` |
 
-Why two processes for M3, M4 and M5: the worker (`--follow`) processes the stream, the API (uvicorn) answers the
-gateway; they share the same SQLite database. `INCIDENT_OUTBOX=0` keeps the M3 API from publishing the same outbox
+Why two processes for M3: the worker (`--follow`) processes the stream, the API (uvicorn) answers the gateway and the
+assessment service; they share the same SQLite database. The assessment service is one process (worker + API) so its
+three models load once. `INCIDENT_OUTBOX=0` keeps the M3 API from publishing the same outbox
 rows as the ingester. Stop everything with Ctrl+C in each terminal.
 
 **Before each new run, clear runtime data** (or use `dev_stack.sh reset`, which keeps a backup):
 ```bash
-cd $VG/services && rm -rf incident_service/data agent_service/data notification_service/data rule_engine/out vision_pipeline/out
+cd $VG/services && rm -rf incident_service/data rule_engine/out vision_pipeline/out
 ```
 
 ### B3. What to look at in the UI (http://localhost:3000)
 - **Incidents** (list): with the clip, 8 incidents within about 40 s: possible fire, possible smoke, missing helmet,
   missing helmet + vest (several people), missing vest. `needs review` = low confidence or inferred evidence.
-  Filters: status, camera, needs-review only.
-- **Incident detail** (click an ID): evidence images (3 frames, boxes drawn by M3), the AI assessment (risk score,
-  severity, suggested actions and SOP references from `agent_service/knowledge_base`), history, and the **Review** form.
-  Fire is CRITICAL (85/100). Without `ANTHROPIC_API_KEY` the text comes from a template (`explanation_mode: template`);
+  Columns **Severity** and **Judge** (confirmed / unsure / likely false alarm / no judge). Order: **Priority** (risk
+  first; PPE the judge calls a likely false alarm goes last; fire/smoke never moved down) or newest. Filters: status,
+  judge verdict, camera, needs-review only.
+- **Incident detail** (click an ID): evidence images (3 frames, boxes drawn by M3), the AI assessment: the judge verdict
+  with each vision transformer's score and the thresholds (for fire/smoke also the two Claude judges' answers), risk
+  score, severity, suggested actions and SOP references from `agent_service/knowledge_base`; history, and the
+  **Review** form. Fire is CRITICAL (85/100) and the judge says UNSURE unless the LLM panel is on
+  (`export ANTHROPIC_API_KEY=...` and `JUDGE_PANEL=anthropic $VG/scripts/dev_stack.sh start clip`). Without `ANTHROPIC_API_KEY` the text comes from a template (`explanation_mode: template`);
   start with `LLM_KIND=anthropic $VG/scripts/dev_stack.sh start clip` (key exported) to have Claude write it.
 - **Review**: Confirm / Reject / Under review with a comment. The reviewer name comes from the token. Rejected/confirmed
   labels feed M8 (Admin -> labels).
 - **Cameras**: CAM_001 state (`running`, then `finished` for the clip), frames captured/processed/dropped, fps.
   Live video is not proxied by M6 yet; for a debug view open **http://localhost:8001/cameras/CAM_001/stream** (M1
   directly, no login - never expose it).
-- **Admin** (admin role): audit log (`chain_valid` should be true), labels, notifications, requeue of dead notifications.
+- **Admin** (admin role): audit log (`chain_valid` should be true). Labels: `GET /api/labels`.
 - Roles: `--role viewer` (read only), `reviewer` (+ review), `admin` (+ labels/audit). Try a viewer token to see 403s.
 
 ### B4. Full stack with the webcam
-`$VG/scripts/dev_stack.sh reset && $VG/scripts/dev_stack.sh start webcam` (or row 10 with `configs/pipeline.combined.yaml`).
+`$VG/scripts/dev_stack.sh reset && $VG/scripts/dev_stack.sh start webcam` (or row 7 with `configs/pipeline.combined.yaml`).
 Watch yourself at http://localhost:8001/cameras/CAM_001/stream, do the A2 tests, and the incidents appear in the UI.
 Run it from Terminal (or iTerm/VS Code): the camera permission belongs to the app that starts M1.
 

@@ -3,6 +3,11 @@
 Advisory factory safety monitoring: Computer Vision + deterministic rules + Agentic AI/RAG + MLOps.
 **The system is advisory only. It never controls machinery. LLMs never make safety-critical decisions.**
 
+> **v3 update (2026-11-16):** the notification service (M5) is removed, M4 becomes an **assessment service** with a
+> hybrid judge (PPE: a local ensemble of three vision transformers; fire/smoke: the same ensemble plus a panel of two
+> Claude models), and every assessment is stored in M3's incident database. Built and run end to end 2026-11-16. Details:
+> `visionguard/ARCHITECTURE_V3_ASSESSMENT.md`. Sections below are updated where marked **v3**.
+
 ---
 
 ## 1. What changed from v1
@@ -15,7 +20,8 @@ Advisory factory safety monitoring: Computer Vision + deterministic rules + Agen
 | 4 | Explicit **PPE-to-person association** and **zone geometry** (polygons, foot-point) | Rule accuracy depends on it |
 | 5 | Rule **state machine** (N-of-M frames, cooldown, dedup) | Prevents flicker and duplicate incidents |
 | 6 | Separate **Fire/Smoke model** with its own thresholds | Different data, different failure costs |
-| 7 | Added **Notification service** and **Human review / feedback loop** | Supervisors must actually be told; labels feed retraining |
+| 7 | Added **Notification service** and **Human review / feedback loop** | Supervisors must actually be told; labels feed retraining. **v3:** notification service removed (dashboard only); review loop kept |
+| 12 | **v3:** **Assessment service** with a hybrid judge (ViT ensemble for PPE; ViT + two-LLM panel for fire/smoke), results stored in the incident DB | Fewer false alarms reach reviewers; one source of truth |
 | 8 | Risk scoring is a **deterministic library**, not an LLM step or a service | Auditable, testable |
 | 9 | Outbox pattern, schema versioning, idempotency keys for events | No lost or duplicated incidents |
 | 10 | Added **Evaluation** (agent, RAG, end-to-end replay) and **Non-functional requirements** (SLOs, privacy, security) | Missing in v1 |
@@ -62,7 +68,7 @@ flowchart TB
 
     K{{Kafka / Redis Streams<br/>incident.created.v1}}
 
-    subgraph AI["M4 · Agent + RAG Service"]
+    subgraph AI["M4 · Assessment Service (v3; was Agent + RAG)"]
         A1[LangGraph orchestrator]
         A2[RAG retriever]
         A3[Risk library<br/>deterministic]
@@ -72,7 +78,7 @@ flowchart TB
         A1 --> A4
     end
 
-    NS[M5 · Notification Service<br/>Slack / Teams / SMS / email]
+    JG["Judge (v3)<br/>ViT ensemble: all<br/>+ Claude panel: fire/smoke"]
     API[M6 · Backend API<br/>FastAPI + RBAC]
     UI[M7 · Dashboard<br/>React]
     HITL[Human Review<br/>confirm / reject]
@@ -92,8 +98,8 @@ flowchart TB
     I1 --> PG
     I3 --> K
     K --> A1
-    K --> NS
-    A1 --> PG
+    A1 --> JG
+    A1 -->|assessment| I1
     A2 --> QD
     API --> PG
     API --> MN
@@ -143,12 +149,13 @@ flowchart TB
         │ frame_id      evidence ► MinIO
         └───────────────  outbox ► Kafka/Redis Streams
                                    │ incident.created.v1
-                    ┌──────────────┼───────────────┐
-                    ▼              ▼               ▼
-            M4 AGENT + RAG   M5 NOTIFICATIONS   M6 BACKEND API ◄── M7 DASHBOARD
-            LangGraph        Slack/Teams/SMS    FastAPI+RBAC       React
-            Qdrant, Risk lib                                          │
-            LLM (explain)                                       Human review
+                    ┌──────────────┴───────────────┐
+                    ▼                              ▼
+            M4 ASSESSMENT SERVICE (v3)       M6 BACKEND API ◄── M7 DASHBOARD
+            judge: ViT ensemble (all)        FastAPI+RBAC       React
+                 + Claude panel (fire/smoke)  reads M3 only        │
+            risk rules, SOP search, explain                  Human review
+            → result stored in M3's DB
                                                                 (confirm/reject)
                                                                       │ labels
                                                                       ▼
@@ -161,7 +168,7 @@ flowchart TB
 ## 3. Three data paths (keep them separate)
 
 1. **Video path** (high volume): camera → in-process queue → detector → tracker → rule engine. JPEG frames go to the frame buffer, never through Kafka.
-2. **Event path** (low volume, structured): incident → outbox → Kafka/Redis Streams → agent, notifications, API.
+2. **Event path** (low volume, structured): incident → outbox → Kafka/Redis Streams → assessment service → result back into M3 (v3: no notification consumer).
 3. **Engineering path**: DVC/MLflow/CI-CD/observability.
 
 ---
@@ -349,6 +356,9 @@ Failure handling: retries with backoff, dead-letter topic `incident.dlq`, health
 
 ### M4 – Agent + RAG Service
 
+> **v3:** becomes the **assessment service**: adds the judge (ViT ensemble; plus a two-LLM panel for fire/smoke) and
+> writes its result to M3's `assessments` table. See `visionguard/ARCHITECTURE_V3_ASSESSMENT.md`.
+
 Runs **only on confirmed incidents**, never per frame. One LangGraph orchestrator.
 
 | | |
@@ -396,6 +406,8 @@ Retrieval: hybrid (dense + BM25) with reranking.
 ---
 
 ### M5 – Notification Service
+
+> **v3: removed.** Incidents are seen in the dashboard. If push alerts are needed later, M3 can call a webhook.
 
 | | |
 |---|---|
@@ -531,7 +543,7 @@ Key metrics: dropped frames, FPS per camera, inference p95 latency, active track
 4. The rule engine confirms the violation after N-of-M frames.
 5. Evidence is saved to MinIO and the incident is created once (no duplicates).
 6. The agent retrieves the welding procedure via RAG and the risk library scores severity.
-7. The LLM writes a cited explanation; the supervisor gets a Slack/Teams message.
+7. The judge checks the evidence (ViT ensemble; plus two Claude models for fire/smoke) and the explanation cites the SOP; the result is stored with the incident (v3).
 8. The dashboard shows the incident; the supervisor confirms it and the label goes to the retraining set.
 9. Grafana shows FPS, latency, and incident metrics.
 
@@ -546,7 +558,6 @@ visionguard/
 │   ├── rule_engine/         # association, zones, state machine
 │   ├── incident_service/
 │   ├── agent_rag_service/
-│   ├── notification_service/
 │   └── backend_api/
 ├── libs/
 │   ├── schemas/             # pydantic event contracts (versioned)

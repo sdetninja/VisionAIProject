@@ -1,8 +1,34 @@
 import React, { useState } from "react";
 import { usePolling } from "../hooks.js";
-import { ACTION_LABEL, actionsFor, describeIncident, errorMessage } from "../format.js";
-import { ErrorBanner, SeverityBadge, StatusBadge } from "./Common.jsx";
+import { ACTION_LABEL, actionsFor, describeIncident, errorMessage, pct, verdictNote } from "../format.js";
+import { ErrorBanner, SeverityBadge, StatusBadge, VerdictBadge } from "./Common.jsx";
 import Evidence from "./Evidence.jsx";
+
+const MODEL_NAME = { vit_s: "ViT-S", dinov2_s: "DINOv2-S", swin_t: "Swin-T", opus: "Claude Opus 5.5", sonnet: "Claude Sonnet 5.5" };
+const CHECK_NAME = { helmet: "no helmet", vest: "no vest", hazard: "fire/smoke" };
+
+// Second opinion on the rule engine's claim: the ViT ensemble (all judged incidents) and, for fire/smoke, the LLM panel.
+function Judge({ a, eventType }) {
+  const checks = Object.entries(a.vit || {}).filter(([k]) => k !== "items");
+  const note = verdictNote(a.verdict, eventType);
+  return (
+    <div>
+      <p><VerdictBadge verdict={a.verdict} /> {a.judge_reason && <span className="muted small">{a.judge_reason}</span>}</p>
+      {note && <div className="banner warn">{note}</div>}
+      {checks.length > 0 && (
+        <table className="scores"><thead><tr><th>Claim</th><th>Ensemble</th>{Object.keys(checks[0][1].models || {}).map((m) => <th key={m}>{MODEL_NAME[m] || m}</th>)}<th>Thresholds</th></tr></thead>
+          <tbody>{checks.map(([item, v]) => (
+            <tr key={item}><td>{CHECK_NAME[item] || item}</td><td><strong>{pct(v.ensemble)}</strong></td>
+              {Object.values(v.models || {}).map((p, i) => <td key={i}>{pct(p)}</td>)}
+              <td className="muted">false &lt; {pct(v.reject_below)}, confirmed ≥ {pct(v.confirm_above)}</td></tr>))}
+          </tbody></table>)}
+      {a.llm && (<ul className="small">{Object.entries(a.llm).map(([n, j]) => (
+        <li key={n}><strong>{MODEL_NAME[n] || n}:</strong> {j.verdict}{j.confidence ? ` (${pct(j.confidence)})` : ""}
+          {j.lookalike ? ` · looks like: ${j.lookalike}` : ""}{j.reason ? ` · ${j.reason}` : ""}{j.error ? <span className="muted"> · not available: {j.error}</span> : ""}</li>))}
+      </ul>)}
+    </div>
+  );
+}
 
 export default function IncidentDetail({ api, id, role, onBack }) {
   const { data: inc, error } = usePolling((signal) => api.incident(id, { signal }), [id], 5000);
@@ -21,7 +47,7 @@ export default function IncidentDetail({ api, id, role, onBack }) {
   };
 
   if (!cur) return <section><button className="link" onClick={onBack}>← Back</button><ErrorBanner error={error} />{!error && <p className="muted">Loading…</p>}</section>;
-  const a = cur.analysis && !cur.analysis.unavailable ? cur.analysis : null;
+  const a = cur.assessment || null;    // null until the assessment service has judged this incident
   const actions = actionsFor(cur.status, role);
   return (
     <section>
@@ -35,15 +61,16 @@ export default function IncidentDetail({ api, id, role, onBack }) {
         <div className="card"><h3>Evidence</h3><Evidence api={api} paths={cur.evidence} />{cur.evidence_status === "missing" && <p className="muted">Frames were no longer available when the incident was created.</p>}</div>
         <div className="card">
           <h3>AI assessment <span className="badge advisory">advisory only</span></h3>
-          {cur.analysis?.unavailable && <p className="muted">Analysis is not available yet.</p>}
+          {!a && <p className="muted">Not assessed yet (the judge runs a few seconds after the incident is created).</p>}
           {a && (<>
+            <Judge a={a} eventType={cur.event_type} />
             <p><strong>Risk {a.risk_score}/100.</strong> {a.summary}</p>
             {!a.grounded && <div className="banner warn">No matching policy was found. Treat this as unverified.</div>}
             {a.recommended_actions?.length > 0 && <><h4>Suggested actions</h4><ul>{a.recommended_actions.map((x, i) => <li key={i}>{x}</li>)}</ul></>}
             {a.citations?.length > 0 && <><h4>Policy references</h4><ul>{a.citations.map((c) => <li key={c.id}>{c.source}: {c.heading}</li>)}</ul></>}
             <details><summary>How the score was calculated</summary><ul>{(a.risk_factors || []).map((f, i) => <li key={i}>{f}</li>)}</ul></details>
           </>)}
-          <p className="muted small">The system detects and advises; people decide. Severity is calculated by fixed rules, not by the language model.</p>
+          <p className="muted small">The system detects and advises; people decide. Severity is calculated by fixed rules, not by the judge or a language model.</p>
         </div>
       </div>
 

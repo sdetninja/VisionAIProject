@@ -12,6 +12,7 @@ class Config:
     jpeg_quality: int = 85
     draw_boxes: bool = True
     blur_faces: bool = False             # best-effort Haar face blur on stored evidence
+    keep_raw_evidence: bool = True       # also store frames without drawn boxes, for the assessment service's judge
     frame_source_url: str = ""           # M1 API base, e.g. http://localhost:8001 (empty = in-process buffer)
     bus: str = "jsonl"                   # jsonl | memory
     bus_path: str = "bus/events.jsonl"

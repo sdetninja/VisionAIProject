@@ -31,8 +31,6 @@ export function createApi({ baseUrl = "", getToken, onUnauthorized = () => {}, f
     incident: (id, o) => call(`/api/incidents/${encodeURIComponent(id)}`, o),
     evidence: (path, o) => call(path, { ...o, raw: true }),    // path comes from the gateway response
     review: (id, action, comment) => call(`/api/incidents/${encodeURIComponent(id)}/review`, { method: "POST", body: { action, comment: comment || undefined } }),
-    notifications: (params, o) => call("/api/notifications", { ...o, params }),
-    requeueNotifications: () => call("/api/notifications/requeue-dead", { method: "POST" }),
     audit: (params, o) => call("/api/audit", { ...o, params }),
   };
 }

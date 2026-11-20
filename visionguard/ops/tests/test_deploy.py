@@ -33,12 +33,12 @@ def test_compose_publishes_only_gateway_and_tools_on_loopback():
     for name, s in c["services"].items():
         for port in s.get("ports", []):
             assert str(port).startswith("127.0.0.1:"), (name, port)
-    assert "ports" not in c["services"]["incident-api"] and "ports" not in c["services"]["agent-worker"]
+    assert "ports" not in c["services"]["incident-api"] and "ports" not in c["services"]["assessment-worker"]
 
 
 def test_app_containers_hardened():
     c = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text())
-    for n in ("gateway", "incident-api", "incident-worker", "agent-worker", "notification-worker", "rule-engine"):
+    for n in ("gateway", "incident-api", "incident-worker", "assessment-worker", "rule-engine"):
         s = c["services"][n]
         assert s["read_only"] is True and s["cap_drop"] == ["ALL"] and "no-new-privileges:true" in s["security_opt"], n
 
@@ -56,5 +56,6 @@ def test_no_real_secrets_committed():
 def test_compose_worker_commands_match_bus_paths():
     c = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text())["services"]
     inc = yaml.safe_load((ROOT / "services/incident_service/configs/incident.compose.yaml").read_text())
-    assert inc["bus_path"] in c["agent-worker"]["command"] and inc["bus_path"] in c["notification-worker"]["command"]
+    assert inc["bus_path"] in c["assessment-worker"]["command"] and "notification-worker" not in c
+    assert "http://incident-api:8003" in c["assessment-worker"]["command"]
     assert "/data/bus/rule_events.jsonl" in c["incident-worker"]["command"]

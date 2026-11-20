@@ -6,7 +6,10 @@ Review console for supervisors. Talks **only** to the M6 gateway (`/api/*`).
 - **Incidents** – filterable queue (status, camera, needs-review), auto-refresh every 5 s, paging.
 - **Incident detail** – evidence gallery, AI assessment (clearly labelled *advisory only*, with policy citations and score breakdown), review actions with comment, history.
 - **Cameras** – cameras visible to the signed-in user.
-- **Notifications / Admin** – delivery queue (reviewer+), retry failed, tamper-evident audit log with chain status (admin).
+- **Admin** – tamper-evident audit log with chain status (admin only). (v3: the notifications panel is gone with M5.)
+- **Judge** – the queue shows each incident's severity and judge verdict and sorts by priority (risk first, PPE the judge
+  calls a likely false alarm last; fire/smoke never moved down); the incident page shows the ViT ensemble scores and, for
+  fire/smoke, the two Claude judges' answers (ARCHITECTURE_V3_ASSESSMENT.md).
 
 ## Run
 ```bash
